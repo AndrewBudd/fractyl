@@ -2,6 +2,9 @@
 #include "../include/core.h"
 #include "../utils/json.h"
 #include "../core/index.h"
+#include "../core/objects.h"
+#include "../core/hash.h"
+#include "../vendor/xdiff/fractyl-diff.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -176,7 +179,159 @@ static int resolve_relative_snapshot(const char *relative_spec, const char *frac
     return FRACTYL_OK;
 }
 
+// Load index from snapshot's stored index hash
+static int load_snapshot_index(const unsigned char *index_hash, const char *fractyl_dir, index_t *index) {
+    void *index_data;
+    size_t index_size;
+    
+    // Load the index data from object storage
+    int result = object_load(index_hash, fractyl_dir, &index_data, &index_size);
+    if (result != FRACTYL_OK) {
+        return result;
+    }
+    
+    // Write to a temporary file to use index_load
+    char temp_path[] = "/tmp/fractyl_index_XXXXXX";
+    int temp_fd = mkstemp(temp_path);
+    if (temp_fd == -1) {
+        free(index_data);
+        return FRACTYL_ERROR_IO;
+    }
+    
+    if (write(temp_fd, index_data, index_size) != (ssize_t)index_size) {
+        close(temp_fd);
+        unlink(temp_path);
+        free(index_data);
+        return FRACTYL_ERROR_IO;
+    }
+    close(temp_fd);
+    free(index_data);
+    
+    // Load the index from temporary file
+    result = index_load(index, temp_path);
+    unlink(temp_path);
+    
+    return result;
+}
 
+// Compare file contents between two snapshots with line-by-line diff
+static int compare_file_contents(const index_entry_t *entry_a, const index_entry_t *entry_b, 
+                                const char *path, const char *fractyl_dir) {
+    void *data_a = NULL, *data_b = NULL;
+    size_t size_a = 0, size_b = 0;
+    
+    // Load file content from first snapshot
+    if (entry_a) {
+        if (object_load(entry_a->hash, fractyl_dir, &data_a, &size_a) != FRACTYL_OK) {
+            printf("Warning: Could not load content for %s from first snapshot\n", path);
+            return FRACTYL_ERROR_IO;
+        }
+    }
+    
+    // Load file content from second snapshot
+    if (entry_b) {
+        if (object_load(entry_b->hash, fractyl_dir, &data_b, &size_b) != FRACTYL_OK) {
+            printf("Warning: Could not load content for %s from second snapshot\n", path);
+            free(data_a);
+            return FRACTYL_ERROR_IO;
+        }
+    }
+    
+    // Perform the diff using xdiff
+    int result = fractyl_diff_unified(path, data_a, size_a, path, data_b, size_b, 3);
+    
+    // Cleanup
+    free(data_a);
+    free(data_b);
+    
+    return result == 0 ? FRACTYL_OK : FRACTYL_ERROR_GENERIC;
+}
+
+// Compare file contents between two snapshots  
+static int compare_snapshot_contents(const snapshot_t *snap_a, const snapshot_t *snap_b, const char *fractyl_dir) {
+    printf("\nFile-by-file comparison:\n");
+    
+    // Compare the index hashes to determine if there are differences
+    if (memcmp(snap_a->index_hash, snap_b->index_hash, 32) == 0) {
+        printf("No differences detected between snapshots\n");
+        return FRACTYL_OK;
+    }
+    
+    // Load indices from both snapshots
+    index_t index_a, index_b;
+    if (load_snapshot_index(snap_a->index_hash, fractyl_dir, &index_a) != FRACTYL_OK) {
+        printf("Could not load index from first snapshot\n");
+        return FRACTYL_ERROR_IO;
+    }
+    
+    if (load_snapshot_index(snap_b->index_hash, fractyl_dir, &index_b) != FRACTYL_OK) {
+        printf("Could not load index from second snapshot\n");
+        index_free(&index_a);
+        return FRACTYL_ERROR_IO;
+    }
+    
+    // Create a unified list of all files from both indices
+    typedef struct {
+        char *path;
+        const index_entry_t *entry_a;
+        const index_entry_t *entry_b;
+    } file_comparison_t;
+    
+    file_comparison_t *comparisons = NULL;
+    size_t comparison_count = 0;
+    size_t comparison_capacity = 0;
+    
+    // Add all files from index_a
+    for (size_t i = 0; i < index_a.count; i++) {
+        if (comparison_count >= comparison_capacity) {
+            comparison_capacity = comparison_capacity ? comparison_capacity * 2 : 16;
+            comparisons = realloc(comparisons, comparison_capacity * sizeof(file_comparison_t));
+        }
+        comparisons[comparison_count].path = strdup(index_a.entries[i].path);
+        comparisons[comparison_count].entry_a = &index_a.entries[i];
+        comparisons[comparison_count].entry_b = index_find_entry(&index_b, index_a.entries[i].path);
+        comparison_count++;
+    }
+    
+    // Add files that are only in index_b
+    for (size_t i = 0; i < index_b.count; i++) {
+        const index_entry_t *found_in_a = index_find_entry(&index_a, index_b.entries[i].path);
+        if (!found_in_a) {
+            if (comparison_count >= comparison_capacity) {
+                comparison_capacity = comparison_capacity ? comparison_capacity * 2 : 16;
+                comparisons = realloc(comparisons, comparison_capacity * sizeof(file_comparison_t));
+            }
+            comparisons[comparison_count].path = strdup(index_b.entries[i].path);
+            comparisons[comparison_count].entry_a = NULL;
+            comparisons[comparison_count].entry_b = &index_b.entries[i];
+            comparison_count++;
+        }
+    }
+    
+    // Compare each file
+    for (size_t i = 0; i < comparison_count; i++) {
+        const file_comparison_t *comp = &comparisons[i];
+        
+        // Skip if files are identical (same hash)
+        if (comp->entry_a && comp->entry_b && 
+            memcmp(comp->entry_a->hash, comp->entry_b->hash, 32) == 0) {
+            continue;
+        }
+        
+        // Perform the actual diff
+        compare_file_contents(comp->entry_a, comp->entry_b, comp->path, fractyl_dir);
+    }
+    
+    // Cleanup
+    for (size_t i = 0; i < comparison_count; i++) {
+        free(comparisons[i].path);
+    }
+    free(comparisons);
+    index_free(&index_a);
+    index_free(&index_b);
+    
+    return FRACTYL_OK;
+}
 
 int cmd_diff(int argc, char **argv) {
     if (argc < 4) {
@@ -301,11 +456,14 @@ int cmd_diff(int argc, char **argv) {
             printf("  Both snapshots created at same time\n");
         }
         
-        printf("\nTo see which files changed, you can:\n");
-        printf("  1. Use 'fractyl restore %s' to restore first snapshot\n", snapshot_a);
-        printf("  2. Compare with working directory\n");
-        printf("  3. Use 'fractyl restore %s' to restore second snapshot\n", snapshot_b);
-        printf("\nNote: Full file-by-file diff coming in future release\n");
+        // Load indices from snapshots to perform file-by-file comparison
+        if (compare_snapshot_contents(&snap_a, &snap_b, fractyl_dir) != FRACTYL_OK) {
+            printf("\nWarning: Could not perform detailed file comparison\n");
+            printf("To see which files changed, you can:\n");
+            printf("  1. Use 'fractyl restore %s' to restore first snapshot\n", snapshot_a);
+            printf("  2. Compare with working directory\n");
+            printf("  3. Use 'fractyl restore %s' to restore second snapshot\n", snapshot_b);
+        }
     }
     
     json_free_snapshot(&snap_a);

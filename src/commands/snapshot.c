@@ -272,12 +272,38 @@ int cmd_snapshot(int argc, char **argv) {
         snapshot.parent = parent_id; // Transfer ownership to snapshot
     }
     
-    // Hash the new index (use simpler approach for now)
-    char index_str[64];
-    snprintf(index_str, sizeof(index_str), "index-%zu", new_index.count);
-    result = hash_data(index_str, strlen(index_str), snapshot.index_hash);
+    // Store the index in object storage and get its hash
+    // First, serialize the index to get its data
+    char temp_index_path[] = "/tmp/fractyl_snapshot_index_XXXXXX";
+    int temp_fd = mkstemp(temp_index_path);
+    if (temp_fd == -1) {
+        printf("Error: Failed to create temporary index file\n");
+        free(snapshot_id);
+        json_free_snapshot(&snapshot);
+        index_free(&current_index);
+        index_free(&new_index);
+        return 1;
+    }
+    close(temp_fd);
+    
+    // Save index to temporary file
+    result = index_save(&new_index, temp_index_path);
     if (result != FRACTYL_OK) {
-        printf("Error: Failed to hash index: %d\n", result);
+        printf("Error: Failed to save temporary index: %d\n", result);
+        unlink(temp_index_path);
+        free(snapshot_id);
+        json_free_snapshot(&snapshot);
+        index_free(&current_index);
+        index_free(&new_index);
+        return 1;
+    }
+    
+    // Store the index file in object storage
+    result = object_store_file(temp_index_path, fractyl_dir, snapshot.index_hash);
+    unlink(temp_index_path); // Clean up temp file
+    
+    if (result != FRACTYL_OK) {
+        printf("Error: Failed to store index in object storage: %d\n", result);
         free(snapshot_id);
         json_free_snapshot(&snapshot);
         index_free(&current_index);

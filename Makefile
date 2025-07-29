@@ -3,7 +3,7 @@
 
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -std=gnu99 -g -Wno-format-truncation
-INCLUDES = -Isrc/include -Isrc/utils -Isrc/core
+INCLUDES = -Isrc/include -Isrc/utils -Isrc/core -Isrc/vendor/xdiff
 LDFLAGS = 
 LIBS = 
 
@@ -20,16 +20,18 @@ MAIN_SRC = $(SRCDIR)/main.c
 UTILS_SRC = $(wildcard $(SRCDIR)/utils/*.c)
 CORE_SRC = $(wildcard $(SRCDIR)/core/*.c)
 COMMANDS_SRC = $(wildcard $(SRCDIR)/commands/*.c)
+XDIFF_SRC = $(wildcard $(SRCDIR)/vendor/xdiff/*.c)
 
-ALL_SRC = $(MAIN_SRC) $(UTILS_SRC) $(CORE_SRC) $(COMMANDS_SRC)
+ALL_SRC = $(MAIN_SRC) $(UTILS_SRC) $(CORE_SRC) $(COMMANDS_SRC) $(XDIFF_SRC)
 
 # Object files (mirror source structure in obj directory)
 MAIN_OBJ = $(OBJDIR)/main.o
 UTILS_OBJ = $(UTILS_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 CORE_OBJ = $(CORE_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 COMMANDS_OBJ = $(COMMANDS_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
+XDIFF_OBJ = $(XDIFF_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-ALL_OBJ = $(MAIN_OBJ) $(UTILS_OBJ) $(CORE_OBJ) $(COMMANDS_OBJ)
+ALL_OBJ = $(MAIN_OBJ) $(UTILS_OBJ) $(CORE_OBJ) $(COMMANDS_OBJ) $(XDIFF_OBJ)
 
 # Library detection (will be expanded)
 HAS_OPENSSL := $(shell pkg-config --exists openssl 2>/dev/null && echo yes)
@@ -83,6 +85,7 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)/utils
 	mkdir -p $(OBJDIR)/core
 	mkdir -p $(OBJDIR)/commands
+	mkdir -p $(OBJDIR)/vendor/xdiff
 
 # Debug build
 debug: CFLAGS += -DDEBUG -O0
