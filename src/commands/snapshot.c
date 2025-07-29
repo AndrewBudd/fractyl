@@ -326,6 +326,15 @@ int cmd_snapshot(int argc, char **argv) {
         return 1;
     }
     
+    // Update LATEST file
+    char latest_path[2048];
+    snprintf(latest_path, sizeof(latest_path), "%s/LATEST", fractyl_dir);
+    FILE *latest_file = fopen(latest_path, "w");
+    if (latest_file) {
+        fprintf(latest_file, "%s\n", snapshot_id);
+        fclose(latest_file);
+    }
+    
     printf("Created snapshot %s: \"%s\"\n", snapshot_id, message);
     printf("Stored %zu files in object storage\n", new_index.count);
     

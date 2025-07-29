@@ -20,8 +20,28 @@ static void print_hash(const unsigned char *hash) {
     }
 }
 
-// Find the most recent snapshot
-static char* find_latest_snapshot(const char *fractyl_dir) {
+// Find the most recent snapshot - use LATEST file if available
+__attribute__((unused)) static char* find_latest_snapshot(const char *fractyl_dir) {
+    char latest_path[2048];
+    snprintf(latest_path, sizeof(latest_path), "%s/LATEST", fractyl_dir);
+    
+    // Try to read from LATEST file first
+    FILE *f = fopen(latest_path, "r");
+    if (f) {
+        char latest_id[64];
+        if (fgets(latest_id, sizeof(latest_id), f)) {
+            fclose(f);
+            // Strip newline
+            size_t len = strlen(latest_id);
+            if (len > 0 && latest_id[len-1] == '\n') {
+                latest_id[len-1] = '\0';
+            }
+            return strdup(latest_id);
+        }
+        fclose(f);
+    }
+    
+    // Fallback to scanning timestamps
     char snapshots_dir[2048];
     snprintf(snapshots_dir, sizeof(snapshots_dir), "%s/snapshots", fractyl_dir);
     
@@ -55,6 +75,78 @@ static char* find_latest_snapshot(const char *fractyl_dir) {
     
     closedir(d);
     return latest_id;
+}
+
+// Get chronologically ordered snapshots (newest first)
+static char** get_chronological_snapshots(const char *fractyl_dir, size_t *count) {
+    char snapshots_dir[2048];
+    snprintf(snapshots_dir, sizeof(snapshots_dir), "%s/snapshots", fractyl_dir);
+    
+    DIR *d = opendir(snapshots_dir);
+    if (!d) {
+        *count = 0;
+        return NULL;
+    }
+    
+    // First pass: collect all snapshots with timestamps
+    typedef struct {
+        char *id;
+        time_t timestamp;
+    } snapshot_info_t;
+    
+    snapshot_info_t *snapshots = NULL;
+    size_t capacity = 0;
+    *count = 0;
+    
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        if (entry->d_name[0] == '.' || !strstr(entry->d_name, ".json")) {
+            continue;
+        }
+        
+        char snapshot_path[2048];
+        snprintf(snapshot_path, sizeof(snapshot_path), "%s/%s", snapshots_dir, entry->d_name);
+        
+        snapshot_t snapshot;
+        if (json_load_snapshot(&snapshot, snapshot_path) == FRACTYL_OK) {
+            if (*count >= capacity) {
+                capacity = capacity ? capacity * 2 : 16;
+                snapshots = realloc(snapshots, capacity * sizeof(snapshot_info_t));
+            }
+            
+            snapshots[*count].id = strdup(snapshot.id);
+            snapshots[*count].timestamp = snapshot.timestamp;
+            (*count)++;
+            
+            json_free_snapshot(&snapshot);
+        }
+    }
+    closedir(d);
+    
+    if (*count == 0) {
+        free(snapshots);
+        return NULL;
+    }
+    
+    // Sort by timestamp (newest first)
+    for (size_t i = 0; i < *count - 1; i++) {
+        for (size_t j = i + 1; j < *count; j++) {
+            if (snapshots[i].timestamp < snapshots[j].timestamp) {
+                snapshot_info_t temp = snapshots[i];
+                snapshots[i] = snapshots[j];
+                snapshots[j] = temp;
+            }
+        }
+    }
+    
+    // Extract just the IDs
+    char **result = malloc(*count * sizeof(char*));
+    for (size_t i = 0; i < *count; i++) {
+        result[i] = snapshots[i].id;
+    }
+    free(snapshots);
+    
+    return result;
 }
 
 // Resolve a hash prefix to a full snapshot ID
@@ -136,46 +228,32 @@ static int resolve_relative_snapshot(const char *relative_spec, const char *frac
         return FRACTYL_ERROR_GENERIC; // Invalid number
     }
     
-    // Find the current HEAD (most recent snapshot)
-    char *current_id = find_latest_snapshot(fractyl_dir);
-    if (!current_id) {
-        return FRACTYL_ERROR_SNAPSHOT_NOT_FOUND; // No snapshots
+    // Get chronologically ordered snapshots
+    size_t count;
+    char **snapshots = get_chronological_snapshots(fractyl_dir, &count);
+    if (!snapshots || count == 0) {
+        return FRACTYL_ERROR_SNAPSHOT_NOT_FOUND;
     }
     
-    // Walk back through parent chain
-    char *walking_id = current_id;
-    for (int i = 0; i < steps_back && walking_id; i++) {
-        char snapshot_path[2048];
-        snprintf(snapshot_path, sizeof(snapshot_path), "%s/snapshots/%s.json", fractyl_dir, walking_id);
-        
-        snapshot_t snapshot;
-        if (json_load_snapshot(&snapshot, snapshot_path) != FRACTYL_OK) {
-            free(current_id);
-            if (walking_id != current_id) free(walking_id);
-            return FRACTYL_ERROR_IO;
+    // -1 means latest (index 0), -2 means second latest (index 1), etc.
+    size_t index = (size_t)(steps_back - 1);
+    if (index >= count) {
+        // Free the snapshots array
+        for (size_t i = 0; i < count; i++) {
+            free(snapshots[i]);
         }
-        
-        char *next_id = NULL;
-        if (snapshot.parent) {
-            next_id = strdup(snapshot.parent);
-        }
-        
-        json_free_snapshot(&snapshot);
-        
-        if (walking_id != current_id) {
-            free(walking_id);
-        }
-        walking_id = next_id;
+        free(snapshots);
+        return FRACTYL_ERROR_SNAPSHOT_NOT_FOUND; // Not enough snapshots
     }
     
-    free(current_id);
+    strcpy(result_id, snapshots[index]);
     
-    if (!walking_id) {
-        return FRACTYL_ERROR_SNAPSHOT_NOT_FOUND; // Walked past the beginning
+    // Free the snapshots array
+    for (size_t i = 0; i < count; i++) {
+        free(snapshots[i]);
     }
+    free(snapshots);
     
-    strcpy(result_id, walking_id);
-    free(walking_id);
     return FRACTYL_OK;
 }
 
