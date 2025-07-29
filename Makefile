@@ -13,7 +13,7 @@ OBJDIR = o
 BINDIR = .
 
 # Target executable
-TARGET = fractyl
+TARGET = frac
 
 # Source files
 MAIN_SRC = $(SRCDIR)/main.c
@@ -106,14 +106,14 @@ BINDIR = $(DESTDIR)$(PREFIX)/bin
 
 # Install system-wide (use with sudo)
 install: $(TARGET)
-	@echo "Installing fractyl to $(BINDIR)..."
+	@echo "Installing frac to $(BINDIR)..."
 	install -d $(BINDIR)
 	install -m 755 $(TARGET) $(BINDIR)/
-	@echo "Installation complete. Run 'fractyl --help' to get started."
+	@echo "Installation complete. Run 'frac --help' to get started."
 
 # Uninstall system-wide (use with sudo)
 uninstall:
-	@echo "Removing fractyl from $(BINDIR)..."
+	@echo "Removing frac from $(BINDIR)..."
 	rm -f $(BINDIR)/$(TARGET)
 	@echo "Uninstall complete."
 

@@ -12,8 +12,8 @@ int main(int argc, char **argv) {
     parse_cli_args(argc, argv, &opts);
 
     if (opts.help) {
-        printf("fractyl -- help\n");
-        printf("Usage: fractyl <command> [options]\n");
+        printf("Fractyl -- help\n");
+        printf("Usage: frac <command> [options]\n");
         printf("Commands:\n");
         printf("  snapshot -m <message>  Create a new snapshot\n");
         printf("  restore <snapshot-id>  Restore to a snapshot\n");
@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (opts.version) {
-        printf("fractyl version %s\n", FRACTYL_VERSION);
+        printf("Fractyl version %s\n", FRACTYL_VERSION);
         return 0;
     }
     if (opts.command && strcmp(opts.command, "--test-utils") == 0) {
@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
         printf("file_exists(%s): %d\n", fake, file_exists(fake));
         // Test: CLI parse again
         char *myargv[] = {
-            "fractyl", "commit", "--debug", "foo.c", NULL
+            "frac", "commit", "--debug", "foo.c", NULL
         };
         cli_options_t opts2;
         parse_cli_args(4, myargv, &opts2);
@@ -69,6 +69,6 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
-    printf("Fractyl project initialized. No action (see --help)\n");
+    printf("Fractyl initialized. No action (see --help)\n");
     return 0;
 }

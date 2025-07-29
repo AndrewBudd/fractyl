@@ -413,7 +413,7 @@ static int compare_snapshot_contents(const snapshot_t *snap_a, const snapshot_t 
 
 int cmd_diff(int argc, char **argv) {
     if (argc < 4) {
-        printf("Usage: fractyl diff <snapshot-a> <snapshot-b>\n");
+        printf("Usage: frac diff <snapshot-a> <snapshot-b>\n");
         printf("Compare files between two snapshots\n");
         printf("\nSnapshot identifiers can be:\n");
         printf("  abc123                          # Hash prefix (minimum 4 chars)\n");
@@ -421,9 +421,9 @@ int cmd_diff(int argc, char **argv) {
         printf("  -1                              # Previous snapshot\n");
         printf("  -2                              # Two snapshots back\n");
         printf("\nExamples:\n");
-        printf("  fractyl diff -2 -1              # Compare last two snapshots\n");
-        printf("  fractyl diff abc123 -1          # Compare prefix with latest\n");
-        printf("\nUse 'fractyl list' to see available snapshots\n");
+        printf("  frac diff -2 -1                 # Compare last two snapshots\n");
+        printf("  frac diff abc123 -1             # Compare prefix with latest\n");
+        printf("\nUse 'frac list' to see available snapshots\n");
         return 1;
     }
     
@@ -456,7 +456,7 @@ int cmd_diff(int argc, char **argv) {
         if (result != FRACTYL_OK) {
             if (result == FRACTYL_ERROR_SNAPSHOT_NOT_FOUND) {
                 printf("Error: No snapshot found matching '%s'\n", snapshot_a_input);
-                printf("Use 'fractyl list' to see available snapshots\n");
+                printf("Use 'frac list' to see available snapshots\n");
             } else if (result == FRACTYL_ERROR_GENERIC && strlen(snapshot_a_input) < 4) {
                 printf("Error: Snapshot identifier '%s' is too short (minimum 4 characters for prefixes)\n", snapshot_a_input);
             }
@@ -470,7 +470,7 @@ int cmd_diff(int argc, char **argv) {
         if (result != FRACTYL_OK) {
             if (result == FRACTYL_ERROR_SNAPSHOT_NOT_FOUND) {
                 printf("Error: No snapshot found matching '%s'\n", snapshot_b_input);
-                printf("Use 'fractyl list' to see available snapshots\n");
+                printf("Use 'frac list' to see available snapshots\n");
             } else if (result == FRACTYL_ERROR_GENERIC && strlen(snapshot_b_input) < 4) {
                 printf("Error: Snapshot identifier '%s' is too short (minimum 4 characters for prefixes)\n", snapshot_b_input);
             }
@@ -538,9 +538,9 @@ int cmd_diff(int argc, char **argv) {
         if (compare_snapshot_contents(&snap_a, &snap_b, fractyl_dir) != FRACTYL_OK) {
             printf("\nWarning: Could not perform detailed file comparison\n");
             printf("To see which files changed, you can:\n");
-            printf("  1. Use 'fractyl restore %s' to restore first snapshot\n", snapshot_a);
+            printf("  1. Use 'frac restore %s' to restore first snapshot\n", snapshot_a);
             printf("  2. Compare with working directory\n");
-            printf("  3. Use 'fractyl restore %s' to restore second snapshot\n", snapshot_b);
+            printf("  3. Use 'frac restore %s' to restore second snapshot\n", snapshot_b);
         }
     }
     
