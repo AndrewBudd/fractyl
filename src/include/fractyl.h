@@ -1,0 +1,19 @@
+// fractyl.h - Common definitions and error codes
+#ifndef FRACTYL_H
+#define FRACTYL_H
+
+#define FRACTYL_VERSION "0.1.0-dev"
+
+typedef enum {
+    FRACTYL_OK = 0,
+    FRACTYL_ERROR_GENERIC = -1,
+    FRACTYL_ERROR_OUT_OF_MEMORY = -2,
+    FRACTYL_ERROR_IO = -3,
+    FRACTYL_ERROR_PATH_TOO_LONG = -4,
+    FRACTYL_ERROR_INDEX_NOT_FOUND = -10,
+    FRACTYL_ERROR_SNAPSHOT_NOT_FOUND = -11,
+    FRACTYL_ERROR_HASH_MISMATCH = -12,
+    FRACTYL_ERROR_PERMISSION_DENIED = -13
+} fractyl_error_t;
+
+#endif // FRACTYL_H

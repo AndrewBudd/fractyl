@@ -1,0 +1,73 @@
+# Build artifacts
+*.o
+*.so
+*.a
+*.dylib
+*.dll
+*.exe
+
+# Build directories
+o/
+build/
+dist/
+
+# Executable (project-specific)
+fractyl
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.#*
+\#*#
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vim/
+tags
+TAGS
+
+# Debug files
+*.dSYM/
+*.pdb
+core
+vgcore.*
+
+# Test artifacts
+*.test
+test_output/
+coverage/
+
+# Logs
+*.log
+logs/
+
+# Development/session files
+.fractyl/
+.puppy_session_memory.json
+
+# Documentation artifacts (if generated)
+doc/
+docs/build/
+
+# Package managers (if used)
+node_modules/
+*.pkg
+
+# Backup files
+*.bak
+*.backup
