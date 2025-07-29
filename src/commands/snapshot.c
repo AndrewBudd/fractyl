@@ -101,6 +101,45 @@ static int scan_directory_recursive(const char *dir_path, const char *relative_p
     return FRACTYL_OK;
 }
 
+// Find the most recent snapshot to use as parent
+static char* find_latest_snapshot(const char *fractyl_dir) {
+    char snapshots_dir[2048];
+    snprintf(snapshots_dir, sizeof(snapshots_dir), "%s/snapshots", fractyl_dir);
+    
+    DIR *d = opendir(snapshots_dir);
+    if (!d) {
+        return NULL; // No snapshots directory or can't open
+    }
+    
+    char *latest_id = NULL;
+    time_t latest_timestamp = 0;
+    
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        // Skip . and .. and non-.json files
+        if (entry->d_name[0] == '.' || !strstr(entry->d_name, ".json")) {
+            continue;
+        }
+        
+        // Load snapshot to get timestamp
+        char snapshot_path[2048];
+        snprintf(snapshot_path, sizeof(snapshot_path), "%s/%s", snapshots_dir, entry->d_name);
+        
+        snapshot_t snapshot;
+        if (json_load_snapshot(&snapshot, snapshot_path) == FRACTYL_OK) {
+            if (snapshot.timestamp > latest_timestamp) {
+                latest_timestamp = snapshot.timestamp;
+                free(latest_id); // Free previous candidate
+                latest_id = strdup(snapshot.id);
+            }
+            json_free_snapshot(&snapshot);
+        }
+    }
+    
+    closedir(d);
+    return latest_id; // Caller must free
+}
+
 static char* generate_snapshot_id(void) {
 #ifdef HAVE_UUID
     uuid_t uuid;
@@ -226,6 +265,12 @@ int cmd_snapshot(int argc, char **argv) {
     strncpy(snapshot.id, snapshot_id, sizeof(snapshot.id) - 1);
     snapshot.description = strdup(message);
     snapshot.timestamp = time(NULL);
+    
+    // Find parent snapshot (most recent one)
+    char *parent_id = find_latest_snapshot(fractyl_dir);
+    if (parent_id) {
+        snapshot.parent = parent_id; // Transfer ownership to snapshot
+    }
     
     // Hash the new index (use simpler approach for now)
     char index_str[64];

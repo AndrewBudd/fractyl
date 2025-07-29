@@ -97,10 +97,22 @@ clean:
 	rm -rf $(OBJDIR)
 	rm -f $(TARGET)
 
-# Install (basic)
+# Installation variables
+PREFIX ?= /usr/local
+BINDIR = $(DESTDIR)$(PREFIX)/bin
+
+# Install system-wide (use with sudo)
 install: $(TARGET)
-	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/
+	@echo "Installing fractyl to $(BINDIR)..."
+	install -d $(BINDIR)
+	install -m 755 $(TARGET) $(BINDIR)/
+	@echo "Installation complete. Run 'fractyl --help' to get started."
+
+# Uninstall system-wide (use with sudo)
+uninstall:
+	@echo "Removing fractyl from $(BINDIR)..."
+	rm -f $(BINDIR)/$(TARGET)
+	@echo "Uninstall complete."
 
 # Test target (placeholder)
 test: $(TARGET)
@@ -132,13 +144,14 @@ help:
 	@echo "  debug      - Build with debug flags"
 	@echo "  release    - Build optimized release version"
 	@echo "  clean      - Remove build artifacts"
-	@echo "  install    - Install to system"
+	@echo "  install    - Install to system (use with sudo)"
+	@echo "  uninstall  - Remove from system (use with sudo)"
 	@echo "  test       - Run basic tests"
 	@echo "  check-deps - Check for required dependencies"
 	@echo "  config     - Show build configuration"
 	@echo "  help       - Show this help"
 
-.PHONY: all debug release clean install test check-deps config help
+.PHONY: all debug release clean install uninstall test check-deps config help
 
 # Dependency generation (advanced - for future)
 # -include $(ALL_OBJ:.o=.d)

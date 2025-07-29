@@ -19,6 +19,7 @@ int main(int argc, char **argv) {
         printf("  restore <snapshot-id>  Restore to a snapshot\n");
         printf("  list                   List all snapshots\n");
         printf("  delete <snapshot-id>   Delete a snapshot\n");
+        printf("  diff <snap-a> <snap-b> Compare two snapshots\n");
         printf("  --test-utils           Run utility tests\n");
         printf("Options:\n");
         printf("  --help                 Show this help\n");
@@ -60,6 +61,8 @@ int main(int argc, char **argv) {
             return cmd_list(argc, argv);
         } else if (strcmp(opts.command, "delete") == 0) {
             return cmd_delete(argc, argv);
+        } else if (strcmp(opts.command, "diff") == 0) {
+            return cmd_diff(argc, argv);
         } else {
             printf("Unknown command: %s\n", opts.command);
             printf("Use --help to see available commands\n");
