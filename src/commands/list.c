@@ -16,6 +16,89 @@ static void print_timestamp(time_t timestamp) {
     printf("%s", time_str);
 }
 
+// Tree node for building snapshot hierarchy
+typedef struct tree_node {
+    char id[64];
+    char *parent_id;
+    char *description;
+    time_t timestamp;
+    struct tree_node **children;
+    size_t child_count;
+    size_t child_capacity;
+} tree_node_t;
+
+// Add a child to a tree node
+static void add_child(tree_node_t *parent, tree_node_t *child) {
+    if (parent->child_count >= parent->child_capacity) {
+        parent->child_capacity = parent->child_capacity ? parent->child_capacity * 2 : 4;
+        parent->children = realloc(parent->children, 
+                                 parent->child_capacity * sizeof(tree_node_t*));
+    }
+    parent->children[parent->child_count++] = child;
+}
+
+// Compare function for sorting children by timestamp
+static int compare_children(const void *a, const void *b) {
+    const tree_node_t *node_a = *(const tree_node_t **)a;
+    const tree_node_t *node_b = *(const tree_node_t **)b;
+    
+    if (node_a->timestamp < node_b->timestamp) return -1;
+    if (node_a->timestamp > node_b->timestamp) return 1;
+    return 0;
+}
+
+// Sort children of a node by timestamp
+static void sort_children(tree_node_t *node) {
+    if (node->child_count > 1) {
+        qsort(node->children, node->child_count, sizeof(tree_node_t*), compare_children);
+    }
+    
+    // Recursively sort children of children
+    for (size_t i = 0; i < node->child_count; i++) {
+        sort_children(node->children[i]);
+    }
+}
+
+// Print the tree with proper indentation and branch characters
+static void print_tree(tree_node_t *node, const char *prefix, int is_last) {
+    if (!node) return;
+    
+    // Print the current node
+    printf("%s%s ", prefix, is_last ? "└── " : "├── ");
+    
+    // Print first 8 characters of ID
+    char short_id[9];
+    strncpy(short_id, node->id, 8);
+    short_id[8] = '\0';
+    
+    printf("%s ", short_id);
+    print_timestamp(node->timestamp);
+    printf(" %s\n", node->description ? node->description : "");
+    
+    // Prepare prefix for children
+    char child_prefix[512];
+    snprintf(child_prefix, sizeof(child_prefix), "%s%s", prefix, is_last ? "    " : "│   ");
+    
+    // Print children
+    for (size_t i = 0; i < node->child_count; i++) {
+        print_tree(node->children[i], child_prefix, i == node->child_count - 1);
+    }
+}
+
+// Free tree node and its children
+static void free_tree_node(tree_node_t *node) {
+    if (!node) return;
+    
+    for (size_t i = 0; i < node->child_count; i++) {
+        free_tree_node(node->children[i]);
+    }
+    
+    free(node->children);
+    free(node->parent_id);
+    free(node->description);
+    free(node);
+}
+
 int cmd_list(int argc, char **argv) {
     (void)argc; (void)argv; // Suppress unused parameter warnings
     
@@ -40,10 +123,10 @@ int cmd_list(int argc, char **argv) {
         return 0;
     }
     
-    printf("Snapshots:\n");
-    printf("%-38s %-20s %s\n", "ID", "Date", "Description");
-    printf("%-38s %-20s %s\n", "------------------------------------", 
-           "--------------------", "--------------------");
+    // First pass: collect all snapshots
+    tree_node_t **all_nodes = NULL;
+    size_t node_count = 0;
+    size_t node_capacity = 0;
     
     struct dirent *entry;
     while ((entry = readdir(d)) != NULL) {
@@ -66,20 +149,99 @@ int cmd_list(int argc, char **argv) {
         char snapshot_id[256];
         size_t name_len = strlen(entry->d_name);
         if (name_len > sizeof(snapshot_id) - 1) {
+            json_free_snapshot(&snapshot);
             continue; // Skip if filename is too long
         }
         strcpy(snapshot_id, entry->d_name);
         char *dot = strrchr(snapshot_id, '.');
         if (dot) *dot = '\0';
         
-        printf("%-38s ", snapshot_id);
-        print_timestamp(snapshot.timestamp);
-        printf(" %s\n", snapshot.description ? snapshot.description : "");
+        // Create tree node
+        tree_node_t *node = malloc(sizeof(tree_node_t));
+        if (!node) {
+            json_free_snapshot(&snapshot);
+            continue;
+        }
+        
+        strcpy(node->id, snapshot_id);
+        node->parent_id = snapshot.parent ? strdup(snapshot.parent) : NULL;
+        node->description = snapshot.description ? strdup(snapshot.description) : NULL;
+        node->timestamp = snapshot.timestamp;
+        node->children = NULL;
+        node->child_count = 0;
+        node->child_capacity = 0;
+        
+        // Add to collection
+        if (node_count >= node_capacity) {
+            node_capacity = node_capacity ? node_capacity * 2 : 16;
+            all_nodes = realloc(all_nodes, node_capacity * sizeof(tree_node_t*));
+        }
+        all_nodes[node_count++] = node;
         
         json_free_snapshot(&snapshot);
     }
-    
     closedir(d);
+    
+    if (node_count == 0) {
+        printf("No snapshots found\n");
+        free(repo_root);
+        return 0;
+    }
+    
+    // Second pass: build parent-child relationships
+    for (size_t i = 0; i < node_count; i++) {
+        tree_node_t *child = all_nodes[i];
+        if (child->parent_id) {
+            // Find parent
+            for (size_t j = 0; j < node_count; j++) {
+                tree_node_t *parent = all_nodes[j];
+                if (strcmp(parent->id, child->parent_id) == 0) {
+                    add_child(parent, child);
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Third pass: find root nodes (nodes with no parent) and sort them
+    tree_node_t **roots = NULL;
+    size_t root_count = 0;
+    size_t root_capacity = 0;
+    
+    for (size_t i = 0; i < node_count; i++) {
+        tree_node_t *node = all_nodes[i];
+        if (!node->parent_id) {
+            if (root_count >= root_capacity) {
+                root_capacity = root_capacity ? root_capacity * 2 : 4;
+                roots = realloc(roots, root_capacity * sizeof(tree_node_t*));
+            }
+            roots[root_count++] = node;
+        }
+    }
+    
+    // Sort root nodes by timestamp
+    if (root_count > 1) {
+        qsort(roots, root_count, sizeof(tree_node_t*), compare_children);
+    }
+    
+    // Sort all children recursively
+    for (size_t i = 0; i < root_count; i++) {
+        sort_children(roots[i]);
+    }
+    
+    // Print the tree
+    printf("Snapshot Tree:\n");
+    for (size_t i = 0; i < root_count; i++) {
+        print_tree(roots[i], "", i == root_count - 1);
+    }
+    
+    // Cleanup - only free root nodes as they recursively free children
+    for (size_t i = 0; i < root_count; i++) {
+        free_tree_node(roots[i]);
+    }
+    free(all_nodes);
+    free(roots);
     free(repo_root);
+    
     return 0;
 }
