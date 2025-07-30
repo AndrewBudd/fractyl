@@ -59,29 +59,54 @@ static void sort_children(tree_node_t *node) {
     }
 }
 
-// Print the tree with proper indentation and branch characters
-static void print_tree(tree_node_t *node, const char *prefix, int is_last) {
-    if (!node) return;
-    
-    // Print the current node
-    printf("%s%s ", prefix, is_last ? "└── " : "├── ");
-    
-    // Print first 8 characters of ID
+// Print snapshot with formatting
+static void print_snapshot(tree_node_t *node, const char *prefix, const char *connector) {
     char short_id[9];
     strncpy(short_id, node->id, 8);
     short_id[8] = '\0';
     
-    printf("%s ", short_id);
+    printf("%s%s%s ", prefix, connector, short_id);
     print_timestamp(node->timestamp);
     printf(" %s\n", node->description ? node->description : "");
+}
+
+// Print the tree structure - linear chains straight down, branches indented
+static void print_tree_structure(tree_node_t *node, const char *prefix, int is_last) {
+    if (!node) return;
     
-    // Prepare prefix for children
-    char child_prefix[512];
-    snprintf(child_prefix, sizeof(child_prefix), "%s%s", prefix, is_last ? "    " : "│   ");
+    // Check if this is part of a linear chain (single parent -> single child)
+    tree_node_t *current = node;
+    int in_linear_chain = 1;
     
-    // Print children
-    for (size_t i = 0; i < node->child_count; i++) {
-        print_tree(node->children[i], child_prefix, i == node->child_count - 1);
+    while (current && in_linear_chain) {
+        if (current == node) {
+            // First node - use connector if we're in a branch
+            const char *connector = (strlen(prefix) == 0) ? "" : (is_last ? "└── " : "├── ");
+            print_snapshot(current, prefix, connector);
+        } else {
+            // Continuing linear chain - no indentation or connectors
+            print_snapshot(current, "", "");
+        }
+        
+        if (current->child_count == 0) {
+            // End of chain
+            break;
+        } else if (current->child_count == 1) {
+            // Single child - continue linear progression
+            current = current->children[0];
+        } else {
+            // Multiple children - branch point, need indentation
+            in_linear_chain = 0;
+            
+            char child_prefix[512];
+            snprintf(child_prefix, sizeof(child_prefix), "%s%s", prefix, 
+                    (strlen(prefix) == 0) ? "" : (is_last ? "    " : "│   "));
+            
+            // Print each branch with indentation
+            for (size_t i = 0; i < current->child_count; i++) {
+                print_tree_structure(current->children[i], child_prefix, i == current->child_count - 1);
+            }
+        }
     }
 }
 
@@ -229,10 +254,11 @@ int cmd_list(int argc, char **argv) {
         sort_children(roots[i]);
     }
     
-    // Print the tree
-    printf("Snapshot Tree:\n");
+    // Print the snapshot history
+    printf("Snapshot History:\n");
     for (size_t i = 0; i < root_count; i++) {
-        print_tree(roots[i], "", i == root_count - 1);
+        if (i > 0) printf("\n"); // Separate different root chains
+        print_tree_structure(roots[i], "", i == root_count - 1);
     }
     
     // Cleanup - only free root nodes as they recursively free children
