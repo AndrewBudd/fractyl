@@ -7,6 +7,7 @@
 #include "../utils/fs.h"
 #include "../utils/git.h"
 #include "../utils/paths.h"
+#include "../utils/gitignore.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,7 +23,8 @@
 #endif
 
 static int scan_directory_recursive(const char *dir_path, const char *relative_path, 
-                                   index_t *new_index, const index_t *prev_index, const char *fractyl_dir) {
+                                   index_t *new_index, const index_t *prev_index, const char *fractyl_dir,
+                                   const char *repo_root) {
     DIR *d = opendir(dir_path);
     if (!d) return FRACTYL_ERROR_IO;
 
@@ -32,8 +34,8 @@ static int scan_directory_recursive(const char *dir_path, const char *relative_p
             continue;
         }
         
-        // Skip .fractyl and .git directories
-        if (strcmp(entry->d_name, ".fractyl") == 0 || strcmp(entry->d_name, ".git") == 0) {
+        // Skip .fractyl directory
+        if (strcmp(entry->d_name, ".fractyl") == 0) {
             continue;
         }
 
@@ -51,10 +53,15 @@ static int scan_directory_recursive(const char *dir_path, const char *relative_p
         if (stat(full_path, &st) != 0) {
             continue;
         }
+        
+        // Check if this path should be ignored according to .gitignore
+        if (gitignore_should_ignore_path(repo_root, full_path, rel_path)) {
+            continue;  // Skip ignored files/directories
+        }
 
         if (S_ISDIR(st.st_mode)) {
             // Recursively scan directory
-            int result = scan_directory_recursive(full_path, rel_path, new_index, prev_index, fractyl_dir);
+            int result = scan_directory_recursive(full_path, rel_path, new_index, prev_index, fractyl_dir, repo_root);
             if (result != FRACTYL_OK) {
                 closedir(d);
                 return result;
@@ -481,7 +488,7 @@ int cmd_snapshot(int argc, char **argv) {
     
     printf("Scanning directory...\n");
     
-    int result = scan_directory_recursive(repo_root, "", &new_index, prev_index_ptr, fractyl_dir);
+    int result = scan_directory_recursive(repo_root, "", &new_index, prev_index_ptr, fractyl_dir, repo_root);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to scan directory: %d\n", result);
         if (auto_message) free(auto_message);
