@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 // Command function signatures
+int cmd_init(int argc, char **argv);
 int cmd_snapshot(int argc, char **argv);
 int cmd_restore(int argc, char **argv);
 int cmd_list(int argc, char **argv);

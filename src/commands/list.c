@@ -19,21 +19,15 @@ static void print_timestamp(time_t timestamp) {
 int cmd_list(int argc, char **argv) {
     (void)argc; (void)argv; // Suppress unused parameter warnings
     
-    // Find .fractyl directory
-    char cwd[1024];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        printf("Error: Cannot get current directory\n");
+    // Find repository root
+    char *repo_root = fractyl_find_repo_root(NULL);
+    if (!repo_root) {
+        printf("Error: Not in a fractyl repository. Use 'frac init' to initialize.\n");
         return 1;
     }
     
     char fractyl_dir[2048];
-    snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", cwd);
-    
-    struct stat st;
-    if (stat(fractyl_dir, &st) != 0) {
-        printf("Error: Not a fractyl repository (no .fractyl directory found)\n");
-        return 1;
-    }
+    snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", repo_root);
     
     // Open snapshots directory
     char snapshots_dir[2048];
@@ -42,6 +36,7 @@ int cmd_list(int argc, char **argv) {
     DIR *d = opendir(snapshots_dir);
     if (!d) {
         printf("No snapshots found\n");
+        free(repo_root);
         return 0;
     }
     
@@ -85,5 +80,6 @@ int cmd_list(int argc, char **argv) {
     }
     
     closedir(d);
+    free(repo_root);
     return 0;
 }

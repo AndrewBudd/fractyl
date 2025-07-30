@@ -140,6 +140,165 @@ static char* find_latest_snapshot(const char *fractyl_dir) {
     return latest_id; // Caller must free
 }
 
+// Get current snapshot ID from CURRENT file
+static char* get_current_snapshot_id(const char *fractyl_dir) {
+    char current_path[2048];
+    snprintf(current_path, sizeof(current_path), "%s/CURRENT", fractyl_dir);
+    
+    FILE *f = fopen(current_path, "r");
+    if (!f) {
+        return NULL;
+    }
+    
+    char current_id[64];
+    if (!fgets(current_id, sizeof(current_id), f)) {
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    
+    // Strip newline
+    size_t len = strlen(current_id);
+    if (len > 0 && current_id[len-1] == '\n') {
+        current_id[len-1] = '\0';
+    }
+    
+    return strdup(current_id);
+}
+
+// Generate short hash from snapshot ID (first 6 characters)
+static void generate_short_hash(const char *snapshot_id, char *short_hash, size_t max_len) {
+    size_t id_len = strlen(snapshot_id);
+    size_t copy_len = (id_len < 6) ? id_len : 6;
+    if (copy_len >= max_len) {
+        copy_len = max_len - 1;
+    }
+    strncpy(short_hash, snapshot_id, copy_len);
+    short_hash[copy_len] = '\0';
+}
+
+// Check if we're creating a divergent branch
+static int is_divergent_branch(const char *fractyl_dir, const char *current_id, const char *latest_id) {
+    if (!current_id || !latest_id) {
+        return 0; // Not divergent if we don't have both IDs
+    }
+    
+    if (strcmp(current_id, latest_id) == 0) {
+        return 0; // Current is latest, not divergent
+    }
+    
+    // Load latest snapshot to check its parent
+    char latest_path[2048];
+    snprintf(latest_path, sizeof(latest_path), "%s/snapshots/%s.json", fractyl_dir, latest_id);
+    
+    snapshot_t latest_snapshot;
+    if (json_load_snapshot(&latest_snapshot, latest_path) != FRACTYL_OK) {
+        return 0; // Can't determine, assume not divergent
+    }
+    
+    int is_divergent = 1;
+    if (latest_snapshot.parent && strcmp(latest_snapshot.parent, current_id) == 0) {
+        is_divergent = 0; // Current is direct parent of latest, not divergent
+    }
+    
+    json_free_snapshot(&latest_snapshot);
+    return is_divergent;
+}
+
+// Generate auto-description based on parent description +n format, with divergence detection
+static char* generate_auto_description(const char *fractyl_dir) {
+    char *latest_id = find_latest_snapshot(fractyl_dir);
+    char *current_id = get_current_snapshot_id(fractyl_dir);
+    
+    if (!latest_id) {
+        // First snapshot
+        free(current_id);
+        return strdup("working");
+    }
+    
+    // Check if this is a divergent branch
+    int divergent = is_divergent_branch(fractyl_dir, current_id, latest_id);
+    
+    // Load the snapshot we're building from (current, not latest)
+    char *parent_id = current_id ? current_id : latest_id;
+    char parent_path[2048];
+    snprintf(parent_path, sizeof(parent_path), "%s/snapshots/%s.json", fractyl_dir, parent_id);
+    
+    snapshot_t parent_snapshot;
+    if (json_load_snapshot(&parent_snapshot, parent_path) != FRACTYL_OK) {
+        free(latest_id);
+        free(current_id);
+        return strdup("working +1");
+    }
+    
+    const char *parent_desc = parent_snapshot.description ? parent_snapshot.description : "working";
+    char *result = NULL;
+    
+    if (divergent && current_id) {
+        // This is a divergent branch - use short hash suffix
+        char short_hash[8];
+        generate_short_hash(current_id, short_hash, sizeof(short_hash));
+        
+        // Extract base description (remove any existing +n suffix)
+        char base_desc[256];
+        char *plus_pos = strrchr(parent_desc, '+');
+        if (plus_pos && plus_pos != parent_desc) {
+            size_t base_len = plus_pos - parent_desc;
+            if (base_len >= sizeof(base_desc)) {
+                base_len = sizeof(base_desc) - 1;
+            }
+            strncpy(base_desc, parent_desc, base_len);
+            base_desc[base_len] = '\0';
+            // Trim trailing whitespace
+            while (base_len > 0 && base_desc[base_len - 1] == ' ') {
+                base_desc[--base_len] = '\0';
+            }
+        } else {
+            strncpy(base_desc, parent_desc, sizeof(base_desc) - 1);
+            base_desc[sizeof(base_desc) - 1] = '\0';
+        }
+        
+        // Create divergent branch name: "base-hash"
+        result = malloc(strlen(base_desc) + strlen(short_hash) + 2);
+        snprintf(result, strlen(base_desc) + strlen(short_hash) + 2, "%s-%s", base_desc, short_hash);
+    } else {
+        // Normal increment behavior
+        char *plus_pos = strrchr(parent_desc, '+');
+        if (plus_pos && plus_pos != parent_desc) {
+            // Extract base description and increment number
+            char base_desc[256];
+            size_t base_len = plus_pos - parent_desc;
+            if (base_len >= sizeof(base_desc)) {
+                base_len = sizeof(base_desc) - 1;
+            }
+            strncpy(base_desc, parent_desc, base_len);
+            base_desc[base_len] = '\0';
+            
+            // Trim trailing whitespace
+            while (base_len > 0 && base_desc[base_len - 1] == ' ') {
+                base_desc[--base_len] = '\0';
+            }
+            
+            int current_num = atoi(plus_pos + 1);
+            if (current_num > 0) {
+                result = malloc(strlen(base_desc) + 20);
+                snprintf(result, strlen(base_desc) + 20, "%s +%d", base_desc, current_num + 1);
+            }
+        }
+        
+        if (!result) {
+            // Parent doesn't follow +n pattern, so start with +1
+            result = malloc(strlen(parent_desc) + 5);
+            snprintf(result, strlen(parent_desc) + 5, "%s +1", parent_desc);
+        }
+    }
+    
+    free(latest_id);
+    free(current_id);
+    json_free_snapshot(&parent_snapshot);
+    return result;
+}
+
 static char* generate_snapshot_id(void) {
 #ifdef HAVE_UUID
     uuid_t uuid;
@@ -162,6 +321,7 @@ static char* generate_snapshot_id(void) {
 
 int cmd_snapshot(int argc, char **argv) {
     const char *message = NULL;
+    char *auto_message = NULL;
     
     // Parse arguments
     for (int i = 1; i < argc; i++) {
@@ -171,38 +331,21 @@ int cmd_snapshot(int argc, char **argv) {
         }
     }
     
-    if (!message) {
-        printf("Error: Snapshot message is required. Use -m \"message\"\n");
-        return 1;
-    }
-    
-    // Find or create .fractyl directory
-    char cwd[1024];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        printf("Error: Cannot get current directory\n");
+    // Find repository root
+    char *repo_root = fractyl_find_repo_root(NULL);
+    if (!repo_root) {
+        printf("Error: Not in a fractyl repository. Use 'frac init' to initialize.\n");
         return 1;
     }
     
     char fractyl_dir[2048];
-    snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", cwd);
+    snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", repo_root);
     
-    // Initialize fractyl repo if needed
-    struct stat st;
-    if (stat(fractyl_dir, &st) != 0) {
-        printf("Initializing fractyl repository...\n");
-        int result = object_storage_init(fractyl_dir);
-        if (result != FRACTYL_OK) {
-            printf("Error: Failed to initialize repository: %d\n", result);
-            return 1;
-        }
-        
-        // Create snapshots directory
-        char snapshots_dir[2048];
-        snprintf(snapshots_dir, sizeof(snapshots_dir), "%s/snapshots", fractyl_dir);
-        if (mkdir(snapshots_dir, 0755) != 0) {
-            printf("Error: Failed to create snapshots directory\n");
-            return 1;
-        }
+    // Generate auto description if no message provided
+    if (!message) {
+        auto_message = generate_auto_description(fractyl_dir);
+        message = auto_message;
+        printf("Auto-generating description: \"%s\"\n", message);
     }
     
     // Load current index
@@ -213,6 +356,8 @@ int cmd_snapshot(int argc, char **argv) {
     int result = index_load(&current_index, index_path);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to load index: %d\n", result);
+        if (auto_message) free(auto_message);
+        free(repo_root);
         return 1;
     }
     
@@ -222,9 +367,11 @@ int cmd_snapshot(int argc, char **argv) {
     
     printf("Scanning directory...\n");
     
-    result = scan_directory_recursive(cwd, "", &new_index, fractyl_dir);
+    result = scan_directory_recursive(repo_root, "", &new_index, fractyl_dir);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to scan directory: %d\n", result);
+        if (auto_message) free(auto_message);
+        free(repo_root);
         index_free(&current_index);
         index_free(&new_index);
         return 1;
@@ -236,6 +383,8 @@ int cmd_snapshot(int argc, char **argv) {
     if (current_index.count == new_index.count) {
         // TODO: More sophisticated change detection
         printf("No changes detected since last snapshot\n");
+        if (auto_message) free(auto_message);
+        free(repo_root);
         index_free(&current_index);
         index_free(&new_index);
         return 0;
@@ -245,6 +394,8 @@ int cmd_snapshot(int argc, char **argv) {
     result = index_save(&new_index, index_path);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to save index: %d\n", result);
+        if (auto_message) free(auto_message);
+        free(repo_root);
         index_free(&current_index);
         index_free(&new_index);
         return 1;
@@ -257,6 +408,8 @@ int cmd_snapshot(int argc, char **argv) {
     char *snapshot_id = generate_snapshot_id();
     if (!snapshot_id) {
         printf("Error: Failed to generate snapshot ID\n");
+        if (auto_message) free(auto_message);
+        free(repo_root);
         index_free(&current_index);
         index_free(&new_index);
         return 1;
@@ -279,6 +432,8 @@ int cmd_snapshot(int argc, char **argv) {
     if (temp_fd == -1) {
         printf("Error: Failed to create temporary index file\n");
         free(snapshot_id);
+        if (auto_message) free(auto_message);
+        free(repo_root);
         json_free_snapshot(&snapshot);
         index_free(&current_index);
         index_free(&new_index);
@@ -292,6 +447,8 @@ int cmd_snapshot(int argc, char **argv) {
         printf("Error: Failed to save temporary index: %d\n", result);
         unlink(temp_index_path);
         free(snapshot_id);
+        if (auto_message) free(auto_message);
+        free(repo_root);
         json_free_snapshot(&snapshot);
         index_free(&current_index);
         index_free(&new_index);
@@ -305,6 +462,8 @@ int cmd_snapshot(int argc, char **argv) {
     if (result != FRACTYL_OK) {
         printf("Error: Failed to store index in object storage: %d\n", result);
         free(snapshot_id);
+        if (auto_message) free(auto_message);
+        free(repo_root);
         json_free_snapshot(&snapshot);
         index_free(&current_index);
         index_free(&new_index);
@@ -320,19 +479,21 @@ int cmd_snapshot(int argc, char **argv) {
     if (result != FRACTYL_OK) {
         printf("Error: Failed to save snapshot: %d\n", result);
         free(snapshot_id);
+        if (auto_message) free(auto_message);
+        free(repo_root);
         json_free_snapshot(&snapshot);
         index_free(&current_index);
         index_free(&new_index);
         return 1;
     }
     
-    // Update LATEST file
-    char latest_path[2048];
-    snprintf(latest_path, sizeof(latest_path), "%s/LATEST", fractyl_dir);
-    FILE *latest_file = fopen(latest_path, "w");
-    if (latest_file) {
-        fprintf(latest_file, "%s\n", snapshot_id);
-        fclose(latest_file);
+    // Update CURRENT file
+    char current_path[2048];
+    snprintf(current_path, sizeof(current_path), "%s/CURRENT", fractyl_dir);
+    FILE *current_file = fopen(current_path, "w");
+    if (current_file) {
+        fprintf(current_file, "%s\n", snapshot_id);
+        fclose(current_file);
     }
     
     printf("Created snapshot %s: \"%s\"\n", snapshot_id, message);
@@ -340,6 +501,10 @@ int cmd_snapshot(int argc, char **argv) {
     
     // Cleanup
     free(snapshot_id);
+    if (auto_message) {
+        free(auto_message);
+    }
+    free(repo_root);
     json_free_snapshot(&snapshot);
     index_free(&current_index);
     index_free(&new_index);

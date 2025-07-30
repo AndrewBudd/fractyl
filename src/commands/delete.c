@@ -15,29 +15,25 @@ int cmd_delete(int argc, char **argv) {
     
     const char *snapshot_id = argv[2];
     
-    // Find .fractyl directory
-    char cwd[1024];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        printf("Error: Cannot get current directory\n");
+    // Find repository root
+    char *repo_root = fractyl_find_repo_root(NULL);
+    if (!repo_root) {
+        printf("Error: Not in a fractyl repository. Use 'frac init' to initialize.\n");
         return 1;
     }
     
     char fractyl_dir[2048];
-    snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", cwd);
-    
-    struct stat st;
-    if (stat(fractyl_dir, &st) != 0) {
-        printf("Error: Not a fractyl repository (no .fractyl directory found)\n");
-        return 1;
-    }
+    snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", repo_root);
     
     // Check if snapshot exists
     char snapshot_path[2048];
     snprintf(snapshot_path, sizeof(snapshot_path), "%s/snapshots/%s.json", 
              fractyl_dir, snapshot_id);
     
+    struct stat st;
     if (stat(snapshot_path, &st) != 0) {
         printf("Error: Snapshot '%s' not found\n", snapshot_id);
+        free(repo_root);
         return 1;
     }
     
@@ -46,6 +42,7 @@ int cmd_delete(int argc, char **argv) {
     int result = json_load_snapshot(&snapshot, snapshot_path);
     if (result != FRACTYL_OK) {
         printf("Error: Invalid snapshot file\n");
+        free(repo_root);
         return 1;
     }
     
@@ -56,6 +53,7 @@ int cmd_delete(int argc, char **argv) {
     if (unlink(snapshot_path) != 0) {
         printf("Error: Failed to delete snapshot file\n");
         json_free_snapshot(&snapshot);
+        free(repo_root);
         return 1;
     }
     
@@ -63,5 +61,6 @@ int cmd_delete(int argc, char **argv) {
     printf("Note: Object files are not garbage collected yet\n");
     
     json_free_snapshot(&snapshot);
+    free(repo_root);
     return 0;
 }

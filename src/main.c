@@ -1,7 +1,10 @@
 // main.c - Entry point for Fractyl
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "fractyl.h"
 #include "commands.h"
 #include "utils/cli.h"
@@ -15,7 +18,8 @@ int main(int argc, char **argv) {
         printf("Fractyl -- help\n");
         printf("Usage: frac <command> [options]\n");
         printf("Commands:\n");
-        printf("  snapshot -m <message>  Create a new snapshot\n");
+        printf("  init                   Initialize a new repository\n");
+        printf("  snapshot [-m <message>] Create a new snapshot\n");
         printf("  restore <snapshot-id>  Restore to a snapshot\n");
         printf("  list                   List all snapshots\n");
         printf("  delete <snapshot-id>   Delete a snapshot\n");
@@ -53,7 +57,9 @@ int main(int argc, char **argv) {
     }
     if (opts.command) {
         // Dispatch to command handlers
-        if (strcmp(opts.command, "snapshot") == 0) {
+        if (strcmp(opts.command, "init") == 0) {
+            return cmd_init(argc, argv);
+        } else if (strcmp(opts.command, "snapshot") == 0) {
             return cmd_snapshot(argc, argv);
         } else if (strcmp(opts.command, "restore") == 0) {
             return cmd_restore(argc, argv);
@@ -69,6 +75,15 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
-    printf("Fractyl initialized. No action (see --help)\n");
+    // Check if we're in a repository
+    char *repo_root = fractyl_find_repo_root(NULL);
+    if (repo_root) {
+        // We're in a repository, do an auto-snapshot
+        free(repo_root);
+        char *args[] = {"frac", "snapshot", NULL};
+        return cmd_snapshot(2, args);
+    }
+    
+    printf("Fractyl not initialized. Use 'frac init' to initialize (see --help)\n");
     return 0;
 }

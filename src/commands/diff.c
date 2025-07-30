@@ -20,23 +20,23 @@ static void print_hash(const unsigned char *hash) {
     }
 }
 
-// Find the most recent snapshot - use LATEST file if available
+// Find the most recent snapshot - use CURRENT file if available
 __attribute__((unused)) static char* find_latest_snapshot(const char *fractyl_dir) {
-    char latest_path[2048];
-    snprintf(latest_path, sizeof(latest_path), "%s/LATEST", fractyl_dir);
+    char current_path[2048];
+    snprintf(current_path, sizeof(current_path), "%s/CURRENT", fractyl_dir);
     
-    // Try to read from LATEST file first
-    FILE *f = fopen(latest_path, "r");
+    // Try to read from CURRENT file first
+    FILE *f = fopen(current_path, "r");
     if (f) {
-        char latest_id[64];
-        if (fgets(latest_id, sizeof(latest_id), f)) {
+        char current_id[64];
+        if (fgets(current_id, sizeof(current_id), f)) {
             fclose(f);
             // Strip newline
-            size_t len = strlen(latest_id);
-            if (len > 0 && latest_id[len-1] == '\n') {
-                latest_id[len-1] = '\0';
+            size_t len = strlen(current_id);
+            if (len > 0 && current_id[len-1] == '\n') {
+                current_id[len-1] = '\0';
             }
-            return strdup(latest_id);
+            return strdup(current_id);
         }
         fclose(f);
     }
@@ -430,21 +430,15 @@ int cmd_diff(int argc, char **argv) {
     const char *snapshot_a_input = argv[2];
     const char *snapshot_b_input = argv[3];
     
-    // Find .fractyl directory
-    char cwd[1024];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        printf("Error: Cannot get current directory\n");
+    // Find repository root
+    char *repo_root = fractyl_find_repo_root(NULL);
+    if (!repo_root) {
+        printf("Error: Not in a fractyl repository. Use 'frac init' to initialize.\n");
         return 1;
     }
     
     char fractyl_dir[2048];
-    snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", cwd);
-    
-    struct stat st;
-    if (stat(fractyl_dir, &st) != 0) {
-        printf("Error: Not a fractyl repository (no .fractyl directory found)\n");
-        return 1;
-    }
+    snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", repo_root);
     
     // Resolve snapshot identifiers (prefixes or relative notation) to full IDs
     char snapshot_a[65], snapshot_b[65];
@@ -460,6 +454,7 @@ int cmd_diff(int argc, char **argv) {
             } else if (result == FRACTYL_ERROR_GENERIC && strlen(snapshot_a_input) < 4) {
                 printf("Error: Snapshot identifier '%s' is too short (minimum 4 characters for prefixes)\n", snapshot_a_input);
             }
+            free(repo_root);
             return 1;
         }
     }
@@ -474,6 +469,7 @@ int cmd_diff(int argc, char **argv) {
             } else if (result == FRACTYL_ERROR_GENERIC && strlen(snapshot_b_input) < 4) {
                 printf("Error: Snapshot identifier '%s' is too short (minimum 4 characters for prefixes)\n", snapshot_b_input);
             }
+            free(repo_root);
             return 1;
         }
     }
@@ -482,6 +478,7 @@ int cmd_diff(int argc, char **argv) {
     if (strcmp(snapshot_a, snapshot_b) == 0) {
         printf("Warning: Comparing snapshot with itself\n");
         printf("Snapshot '%s' is identical to itself\n", snapshot_a);
+        free(repo_root);
         return 0;
     }
     
@@ -494,12 +491,14 @@ int cmd_diff(int argc, char **argv) {
     snapshot_t snap_a, snap_b;
     if (json_load_snapshot(&snap_a, snapshot_a_path) != FRACTYL_OK) {
         printf("Error: Cannot load snapshot '%s'\n", snapshot_a);
+        free(repo_root);
         return 1;
     }
     
     if (json_load_snapshot(&snap_b, snapshot_b_path) != FRACTYL_OK) {
         printf("Error: Cannot load snapshot '%s'\n", snapshot_b);
         json_free_snapshot(&snap_a);
+        free(repo_root);
         return 1;
     }
     
@@ -546,6 +545,7 @@ int cmd_diff(int argc, char **argv) {
     
     json_free_snapshot(&snap_a);
     json_free_snapshot(&snap_b);
+    free(repo_root);
     
     return 0;
 }
