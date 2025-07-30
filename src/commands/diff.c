@@ -1,6 +1,8 @@
 #include "../include/commands.h"
 #include "../include/core.h"
 #include "../utils/json.h"
+#include "../utils/paths.h"
+#include "../utils/git.h"
 #include "../core/index.h"
 #include "../core/objects.h"
 #include "../core/hash.h"
@@ -233,13 +235,17 @@ __attribute__((unused)) static char* find_latest_snapshot(const char *fractyl_di
 }
 
 // Get chronologically ordered snapshots (newest first)
-static char** get_chronological_snapshots(const char *fractyl_dir, size_t *count) {
-    char snapshots_dir[2048];
-    snprintf(snapshots_dir, sizeof(snapshots_dir), "%s/snapshots", fractyl_dir);
+static char** get_chronological_snapshots_for_branch(const char *fractyl_dir, const char *branch, size_t *count) {
+    char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, branch);
+    if (!snapshots_dir) {
+        *count = 0;
+        return NULL;
+    }
     
     DIR *d = opendir(snapshots_dir);
     if (!d) {
         *count = 0;
+        free(snapshots_dir);
         return NULL;
     }
     
@@ -277,6 +283,7 @@ static char** get_chronological_snapshots(const char *fractyl_dir, size_t *count
         }
     }
     closedir(d);
+    free(snapshots_dir);
     
     if (*count == 0) {
         free(snapshots);
@@ -307,18 +314,22 @@ static char** get_chronological_snapshots(const char *fractyl_dir, size_t *count
 // Resolve a hash prefix to a full snapshot ID
 // Returns 0 on success, negative on error
 // result_id must be at least 65 chars (64 + null terminator)
-static int resolve_snapshot_prefix(const char *prefix, const char *fractyl_dir, char *result_id) {
-    char snapshots_dir[2048];
-    snprintf(snapshots_dir, sizeof(snapshots_dir), "%s/snapshots", fractyl_dir);
+static int resolve_snapshot_prefix(const char *prefix, const char *fractyl_dir, const char *branch, char *result_id) {
+    char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, branch);
+    if (!snapshots_dir) {
+        return FRACTYL_ERROR_IO;
+    }
     
     DIR *d = opendir(snapshots_dir);
     if (!d) {
+        free(snapshots_dir);
         return FRACTYL_ERROR_IO;
     }
     
     size_t prefix_len = strlen(prefix);
     if (prefix_len < 4) {
         closedir(d);
+        free(snapshots_dir);
         return FRACTYL_ERROR_GENERIC; // Prefix too short
     }
     
@@ -350,6 +361,7 @@ static int resolve_snapshot_prefix(const char *prefix, const char *fractyl_dir, 
     }
     
     closedir(d);
+    free(snapshots_dir);
     
     if (match_count == 0) {
         return FRACTYL_ERROR_SNAPSHOT_NOT_FOUND;
@@ -372,7 +384,7 @@ static int resolve_snapshot_prefix(const char *prefix, const char *fractyl_dir, 
 
 // Resolve relative notation like -1, -2 to snapshot IDs
 // Returns 0 on success, negative on error
-static int resolve_relative_snapshot(const char *relative_spec, const char *fractyl_dir, char *result_id) {
+static int resolve_relative_snapshot(const char *relative_spec, const char *fractyl_dir, const char *branch, char *result_id) {
     if (relative_spec[0] != '-' || strlen(relative_spec) < 2) {
         return FRACTYL_ERROR_GENERIC; // Not a relative spec
     }
@@ -385,7 +397,7 @@ static int resolve_relative_snapshot(const char *relative_spec, const char *frac
     
     // Get chronologically ordered snapshots
     size_t count;
-    char **snapshots = get_chronological_snapshots(fractyl_dir, &count);
+    char **snapshots = get_chronological_snapshots_for_branch(fractyl_dir, branch, &count);
     if (!snapshots || count == 0) {
         return FRACTYL_ERROR_SNAPSHOT_NOT_FOUND;
     }
@@ -632,13 +644,16 @@ int cmd_diff(int argc, char **argv) {
     char fractyl_dir[2048];
     snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", repo_root);
     
+    // Get current git branch
+    char *git_branch = paths_get_current_branch(repo_root);
+    
     // Resolve snapshot identifiers (prefixes or relative notation) to full IDs
     char snapshot_a[65], snapshot_b[65];
     
     // Try relative notation first, then prefix resolution
-    int result = resolve_relative_snapshot(snapshot_a_input, fractyl_dir, snapshot_a);
+    int result = resolve_relative_snapshot(snapshot_a_input, fractyl_dir, git_branch, snapshot_a);
     if (result != FRACTYL_OK) {
-        result = resolve_snapshot_prefix(snapshot_a_input, fractyl_dir, snapshot_a);
+        result = resolve_snapshot_prefix(snapshot_a_input, fractyl_dir, git_branch, snapshot_a);
         if (result != FRACTYL_OK) {
             if (result == FRACTYL_ERROR_SNAPSHOT_NOT_FOUND) {
                 printf("Error: No snapshot found matching '%s'\n", snapshot_a_input);
@@ -647,13 +662,14 @@ int cmd_diff(int argc, char **argv) {
                 printf("Error: Snapshot identifier '%s' is too short (minimum 4 characters for prefixes)\n", snapshot_a_input);
             }
             free(repo_root);
+            free(git_branch);
             return 1;
         }
     }
     
-    result = resolve_relative_snapshot(snapshot_b_input, fractyl_dir, snapshot_b);
+    result = resolve_relative_snapshot(snapshot_b_input, fractyl_dir, git_branch, snapshot_b);
     if (result != FRACTYL_OK) {
-        result = resolve_snapshot_prefix(snapshot_b_input, fractyl_dir, snapshot_b);
+        result = resolve_snapshot_prefix(snapshot_b_input, fractyl_dir, git_branch, snapshot_b);
         if (result != FRACTYL_OK) {
             if (result == FRACTYL_ERROR_SNAPSHOT_NOT_FOUND) {
                 printf("Error: No snapshot found matching '%s'\n", snapshot_b_input);
@@ -662,6 +678,7 @@ int cmd_diff(int argc, char **argv) {
                 printf("Error: Snapshot identifier '%s' is too short (minimum 4 characters for prefixes)\n", snapshot_b_input);
             }
             free(repo_root);
+            free(git_branch);
             return 1;
         }
     }
@@ -671,19 +688,30 @@ int cmd_diff(int argc, char **argv) {
         printf("Warning: Comparing snapshot with itself\n");
         printf("Snapshot '%s' is identical to itself\n", snapshot_a);
         free(repo_root);
+        free(git_branch);
         return 0;
     }
     
     // Build paths to snapshot files
+    char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, git_branch);
+    if (!snapshots_dir) {
+        printf("Error: Failed to get snapshots directory\n");
+        free(repo_root);
+        free(git_branch);
+        return 1;
+    }
+    
     char snapshot_a_path[2048], snapshot_b_path[2048];
-    snprintf(snapshot_a_path, sizeof(snapshot_a_path), "%s/snapshots/%s.json", fractyl_dir, snapshot_a);
-    snprintf(snapshot_b_path, sizeof(snapshot_b_path), "%s/snapshots/%s.json", fractyl_dir, snapshot_b);
+    snprintf(snapshot_a_path, sizeof(snapshot_a_path), "%s/%s.json", snapshots_dir, snapshot_a);
+    snprintf(snapshot_b_path, sizeof(snapshot_b_path), "%s/%s.json", snapshots_dir, snapshot_b);
+    free(snapshots_dir);
     
     // Load snapshot metadata for display
     snapshot_t snap_a, snap_b;
     if (json_load_snapshot(&snap_a, snapshot_a_path) != FRACTYL_OK) {
         printf("Error: Cannot load snapshot '%s'\n", snapshot_a);
         free(repo_root);
+        free(git_branch);
         return 1;
     }
     
@@ -691,6 +719,7 @@ int cmd_diff(int argc, char **argv) {
         printf("Error: Cannot load snapshot '%s'\n", snapshot_b);
         json_free_snapshot(&snap_a);
         free(repo_root);
+        free(git_branch);
         return 1;
     }
     
@@ -738,6 +767,7 @@ int cmd_diff(int argc, char **argv) {
     json_free_snapshot(&snap_a);
     json_free_snapshot(&snap_b);
     free(repo_root);
+    free(git_branch);
     
     return 0;
 }
