@@ -8,6 +8,7 @@
 #include "../utils/git.h"
 #include "../utils/paths.h"
 #include "../utils/gitignore.h"
+#include "../utils/lock.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -440,6 +441,14 @@ int cmd_snapshot(int argc, char **argv) {
     char fractyl_dir[2048];
     snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", repo_root);
     
+    // Acquire exclusive lock for snapshot operation
+    fractyl_lock_t lock;
+    if (fractyl_lock_wait_acquire(fractyl_dir, &lock, 30) != 0) {
+        printf("Error: Could not acquire lock for snapshot operation\n");
+        free(repo_root);
+        return 1;
+    }
+    
     // Get current git branch
     char *git_branch = paths_get_current_branch(repo_root);
     
@@ -495,6 +504,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(repo_root);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 1;
     }
     
@@ -530,6 +540,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(repo_root);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 0;
     }
     
@@ -543,6 +554,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(repo_root);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 1;
     }
     
@@ -557,6 +569,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(repo_root);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 1;
     }
     
@@ -594,6 +607,7 @@ int cmd_snapshot(int argc, char **argv) {
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 1;
     }
     close(temp_fd);
@@ -609,6 +623,7 @@ int cmd_snapshot(int argc, char **argv) {
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 1;
     }
     
@@ -624,6 +639,7 @@ int cmd_snapshot(int argc, char **argv) {
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 1;
     }
     
@@ -638,6 +654,7 @@ int cmd_snapshot(int argc, char **argv) {
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 1;
     }
     
@@ -657,6 +674,7 @@ int cmd_snapshot(int argc, char **argv) {
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
+        fractyl_lock_release(&lock);
         return 1;
     }
     
@@ -693,6 +711,7 @@ int cmd_snapshot(int argc, char **argv) {
     json_free_snapshot(&snapshot);
     if (prev_index_ptr) index_free(&prev_index);
     index_free(&new_index);
+    fractyl_lock_release(&lock);
     
     return 0;
 }

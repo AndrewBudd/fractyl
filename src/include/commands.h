@@ -14,6 +14,7 @@ int cmd_restore(int argc, char **argv);
 int cmd_list(int argc, char **argv);
 int cmd_delete(int argc, char **argv);
 int cmd_diff(int argc, char **argv);
+int cmd_daemon(int argc, char **argv);
 
 // Helper functions
 int fractyl_init_repo(const char *path);
