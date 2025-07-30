@@ -12,12 +12,167 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <time.h>
+#include <strings.h>
 
 
 static void print_hash(const unsigned char *hash) {
     for (int i = 0; i < 32; i++) {
         printf("%02x", hash[i]);
     }
+}
+
+// Magic number patterns for common binary formats
+static struct {
+    const unsigned char *magic;
+    size_t len;
+    const char *description;
+} magic_patterns[] = {
+    // Executables
+    {(const unsigned char*)"\x7f\x45\x4c\x46", 4, "ELF"}, // ELF executables
+    {(const unsigned char*)"MZ", 2, "PE/DOS"}, // PE/DOS executables
+    {(const unsigned char*)"\xfe\xed\xfa\xce", 4, "Mach-O 32-bit BE"}, // Mach-O
+    {(const unsigned char*)"\xce\xfa\xed\xfe", 4, "Mach-O 32-bit LE"}, // Mach-O
+    {(const unsigned char*)"\xfe\xed\xfa\xcf", 4, "Mach-O 64-bit BE"}, // Mach-O 64-bit
+    {(const unsigned char*)"\xcf\xfa\xed\xfe", 4, "Mach-O 64-bit LE"}, // Mach-O 64-bit
+    
+    // Images
+    {(const unsigned char*)"\xff\xd8\xff", 3, "JPEG"}, // JPEG
+    {(const unsigned char*)"\x89PNG\r\n\x1a\n", 8, "PNG"}, // PNG
+    {(const unsigned char*)"GIF8", 4, "GIF"}, // GIF
+    {(const unsigned char*)"BM", 2, "BMP"}, // BMP
+    {(const unsigned char*)"\x00\x00\x01\x00", 4, "ICO"}, // ICO
+    
+    // Archives
+    {(const unsigned char*)"PK\x03\x04", 4, "ZIP"}, // ZIP
+    {(const unsigned char*)"PK\x05\x06", 4, "ZIP"}, // ZIP (empty)
+    {(const unsigned char*)"PK\x07\x08", 4, "ZIP"}, // ZIP (spanned)
+    {(const unsigned char*)"\x1f\x8b", 2, "GZIP"}, // GZIP
+    {(const unsigned char*)"BZh", 3, "BZIP2"}, // BZIP2
+    {(const unsigned char*)"\x37\x7a\xbc\xaf\x27\x1c", 6, "7Z"}, // 7Z
+    {(const unsigned char*)"Rar!\x1a\x07\x00", 7, "RAR"}, // RAR
+    {(const unsigned char*)"ustar", 5, "TAR"}, // TAR (at offset 257)
+    
+    // Media (simplified patterns)
+    {(const unsigned char*)"ftyp", 4, "MP4"}, // MP4 (simplified - ftyp at offset 4)
+    {(const unsigned char*)"ID3", 3, "MP3"}, // MP3 with ID3
+    {(const unsigned char*)"\xff\xfb", 2, "MP3"}, // MP3
+    {(const unsigned char*)"\xff\xf3", 2, "MP3"}, // MP3
+    {(const unsigned char*)"\xff\xf2", 2, "MP3"}, // MP3
+    {(const unsigned char*)"RIFF", 4, "RIFF"}, // WAV/AVI (check for WAVE/AVI later)
+    
+    // Documents  
+    {(const unsigned char*)"%PDF", 4, "PDF"}, // PDF
+    {(const unsigned char*)"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", 8, "MS Office"}, // MS Office
+    {(const unsigned char*)"PK\x03\x04", 4, "Office XML"}, // Office XML (also ZIP)
+    
+    // Databases
+    {(const unsigned char*)"SQLite format 3\x00", 16, "SQLite"}, // SQLite
+    
+    {NULL, 0, NULL} // Sentinel
+};
+
+// Check for magic number patterns
+static int is_binary_magic(const void *data, size_t size) {
+    if (!data || size == 0) {
+        return 0;
+    }
+    
+    const unsigned char *bytes = (const unsigned char *)data;
+    
+    for (int i = 0; magic_patterns[i].magic; i++) {
+        if (size >= magic_patterns[i].len) {
+            if (memcmp(bytes, magic_patterns[i].magic, magic_patterns[i].len) == 0) {
+                return 1;
+            }
+            
+            // Special case for TAR files (magic at offset 257)
+            if (strcmp(magic_patterns[i].description, "TAR") == 0 && size > 262) {
+                if (memcmp(bytes + 257, magic_patterns[i].magic, magic_patterns[i].len) == 0) {
+                    return 1;
+                }
+            }
+            
+            // Special case for RIFF (check if it's WAV or AVI)
+            if (strcmp(magic_patterns[i].description, "RIFF") == 0 && size >= 12) {
+                if (memcmp(bytes + 8, "WAVE", 4) == 0 || memcmp(bytes + 8, "AVI ", 4) == 0) {
+                    return 1;
+                }
+            }
+        }
+    }
+    
+    return 0;
+}
+
+// Check if data is binary by looking for null bytes or non-printable characters
+static int is_binary_data(const void *data, size_t size) {
+    if (!data || size == 0) {
+        return 0; // Empty files are considered text
+    }
+    
+    // First check for magic numbers (most reliable)
+    if (is_binary_magic(data, size)) {
+        return 1;
+    }
+    
+    const unsigned char *bytes = (const unsigned char *)data;
+    size_t check_size = size < 8192 ? size : 8192; // Check first 8KB
+    size_t null_count = 0;
+    size_t non_printable_count = 0;
+    
+    for (size_t i = 0; i < check_size; i++) {
+        unsigned char byte = bytes[i];
+        
+        // Null bytes strongly indicate binary
+        if (byte == 0) {
+            null_count++;
+            if (null_count > 1) {
+                return 1; // Multiple null bytes = binary
+            }
+        }
+        
+        // Count non-printable characters (except common whitespace)
+        if (byte < 32 && byte != '\t' && byte != '\n' && byte != '\r') {
+            non_printable_count++;
+        } else if (byte > 126) {
+            non_printable_count++;
+        }
+    }
+    
+    // If more than 30% non-printable characters, consider binary
+    if (check_size > 0 && (non_printable_count * 100 / check_size) > 30) {
+        return 1;
+    }
+    
+    return 0;
+}
+
+// Check if file is binary based on extension
+static int is_binary_extension(const char *path) {
+    if (!path) return 0;
+    
+    const char *ext = strrchr(path, '.');
+    if (!ext) return 0;
+    
+    // Common binary extensions
+    const char *binary_extensions[] = {
+        ".exe", ".dll", ".so", ".dylib", ".a", ".lib",
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".ico", ".tiff",
+        ".mp3", ".mp4", ".avi", ".mov", ".wav", ".flac",
+        ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".bin", ".dat", ".db", ".sqlite", ".sqlite3",
+        ".o", ".obj", ".pyc", ".class",
+        NULL
+    };
+    
+    for (int i = 0; binary_extensions[i]; i++) {
+        if (strcasecmp(ext, binary_extensions[i]) == 0) {
+            return 1;
+        }
+    }
+    
+    return 0;
 }
 
 // Find the most recent snapshot - use CURRENT file if available
@@ -315,14 +470,51 @@ static int compare_file_contents(const index_entry_t *entry_a, const index_entry
         }
     }
     
-    // Perform the diff using xdiff
-    int result = fractyl_diff_unified(path, data_a, size_a, path, data_b, size_b, 3);
+    // Check if file is binary by extension first (faster)
+    int is_binary = is_binary_extension(path);
+    
+    // If not binary by extension, check content for both files
+    if (!is_binary) {
+        if (data_a && is_binary_data(data_a, size_a)) {
+            is_binary = 1;
+        } else if (data_b && is_binary_data(data_b, size_b)) {
+            is_binary = 1;
+        }
+    }
+    
+    if (is_binary) {
+        // Handle binary files
+        printf("diff --fractyl a/%s b/%s\n", path, path);
+        
+        if (!entry_a && entry_b) {
+            // File added
+            printf("Binary file b/%s added\n", path);
+        } else if (entry_a && !entry_b) {
+            // File deleted
+            printf("Binary file a/%s deleted\n", path);
+        } else if (entry_a && entry_b) {
+            // File changed - compare hashes to see if actually different
+            if (memcmp(entry_a->hash, entry_b->hash, 32) == 0) {
+                // Same content, no output needed
+            } else {
+                printf("Binary files a/%s and b/%s differ\n", path, path);
+                printf("Size: %zu bytes -> %zu bytes\n", size_a, size_b);
+            }
+        }
+    } else {
+        // Handle text files - perform the diff using xdiff
+        int result = fractyl_diff_unified(path, data_a, size_a, path, data_b, size_b, 3);
+        if (result != 0) {
+            // Diff failed or found differences
+            // Note: fractyl_diff_unified should handle its own output
+        }
+    }
     
     // Cleanup
     free(data_a);
     free(data_b);
     
-    return result == 0 ? FRACTYL_OK : FRACTYL_ERROR_GENERIC;
+    return FRACTYL_OK;
 }
 
 // Compare file contents between two snapshots  

@@ -20,7 +20,7 @@
 #endif
 
 static int scan_directory_recursive(const char *dir_path, const char *relative_path, 
-                                   index_t *new_index, const char *fractyl_dir) {
+                                   index_t *new_index, const index_t *prev_index, const char *fractyl_dir) {
     DIR *d = opendir(dir_path);
     if (!d) return FRACTYL_ERROR_IO;
 
@@ -52,7 +52,7 @@ static int scan_directory_recursive(const char *dir_path, const char *relative_p
 
         if (S_ISDIR(st.st_mode)) {
             // Recursively scan directory
-            int result = scan_directory_recursive(full_path, rel_path, new_index, fractyl_dir);
+            int result = scan_directory_recursive(full_path, rel_path, new_index, prev_index, fractyl_dir);
             if (result != FRACTYL_OK) {
                 closedir(d);
                 return result;
@@ -78,16 +78,47 @@ static int scan_directory_recursive(const char *dir_path, const char *relative_p
             entry_data.size = st.st_size;
             entry_data.mtime = st.st_mtime;
             
-            // Hash the file and store in object storage
-            int result = object_store_file(full_path, fractyl_dir, entry_data.hash);
-            if (result != FRACTYL_OK) {
-                printf("Warning: Failed to store file %s: %d\n", rel_path, result);
-                free(entry_data.path);
-                continue;
+            // Check if file has changed compared to previous snapshot
+            const index_entry_t *prev_entry = prev_index ? index_find_entry(prev_index, rel_path) : NULL;
+            int file_changed = 1; // Assume changed if no previous entry
+            
+            if (prev_entry) {
+                // Quick check: size or mtime changed?
+                if (prev_entry->size == st.st_size && prev_entry->mtime == st.st_mtime) {
+                    // Size and mtime same, file likely unchanged
+                    // Copy the previous hash to avoid re-hashing
+                    memcpy(entry_data.hash, prev_entry->hash, 32);
+                    file_changed = 0;
+                } else {
+                    // Size or mtime changed, need to hash and compare
+                    int result = object_store_file(full_path, fractyl_dir, entry_data.hash);
+                    if (result != FRACTYL_OK) {
+                        printf("Warning: Failed to store file %s: %d\n", rel_path, result);
+                        free(entry_data.path);
+                        continue;
+                    }
+                    
+                    // Compare hashes
+                    if (memcmp(entry_data.hash, prev_entry->hash, 32) == 0) {
+                        file_changed = 0;
+                    }
+                }
+            } else {
+                // New file, hash and store it
+                int result = object_store_file(full_path, fractyl_dir, entry_data.hash);
+                if (result != FRACTYL_OK) {
+                    printf("Warning: Failed to store file %s: %d\n", rel_path, result);
+                    free(entry_data.path);
+                    continue;
+                }
             }
             
-            // Add to index
-            result = index_add_entry(new_index, &entry_data);
+            if (file_changed) {
+                printf("  %s %s\n", prev_entry ? "M" : "A", rel_path);
+            }
+            
+            // Always add to index (even unchanged files need to be tracked)
+            int result = index_add_entry(new_index, &entry_data);
             free(entry_data.path);
             
             if (result != FRACTYL_OK) {
@@ -319,6 +350,41 @@ static char* generate_snapshot_id(void) {
 #endif
 }
 
+// Load index from snapshot's stored index hash
+static int load_snapshot_index(const unsigned char *index_hash, const char *fractyl_dir, index_t *index) {
+    void *index_data;
+    size_t index_size;
+    
+    // Load the index data from object storage
+    int result = object_load(index_hash, fractyl_dir, &index_data, &index_size);
+    if (result != FRACTYL_OK) {
+        return result;
+    }
+    
+    // Write to a temporary file to use index_load
+    char temp_path[] = "/tmp/fractyl_index_XXXXXX";
+    int temp_fd = mkstemp(temp_path);
+    if (temp_fd == -1) {
+        free(index_data);
+        return FRACTYL_ERROR_IO;
+    }
+    
+    if (write(temp_fd, index_data, index_size) != (ssize_t)index_size) {
+        close(temp_fd);
+        unlink(temp_path);
+        free(index_data);
+        return FRACTYL_ERROR_IO;
+    }
+    close(temp_fd);
+    free(index_data);
+    
+    // Load the index from temporary file
+    result = index_load(index, temp_path);
+    unlink(temp_path);
+    
+    return result;
+}
+
 int cmd_snapshot(int argc, char **argv) {
     const char *message = NULL;
     char *auto_message = NULL;
@@ -348,17 +414,27 @@ int cmd_snapshot(int argc, char **argv) {
         printf("Auto-generating description: \"%s\"\n", message);
     }
     
-    // Load current index
-    char index_path[2048];
-    snprintf(index_path, sizeof(index_path), "%s/index", fractyl_dir);
+    // Load previous snapshot's index for comparison
+    char *current_snapshot_id = get_current_snapshot_id(fractyl_dir);
+    index_t prev_index;
+    index_t *prev_index_ptr = NULL;
     
-    index_t current_index;
-    int result = index_load(&current_index, index_path);
-    if (result != FRACTYL_OK) {
-        printf("Error: Failed to load index: %d\n", result);
-        if (auto_message) free(auto_message);
-        free(repo_root);
-        return 1;
+    if (current_snapshot_id) {
+        // Load the current snapshot to get its index hash
+        char current_snapshot_path[2048];
+        snprintf(current_snapshot_path, sizeof(current_snapshot_path), "%s/snapshots/%s.json", fractyl_dir, current_snapshot_id);
+        
+        snapshot_t current_snapshot;
+        if (json_load_snapshot(&current_snapshot, current_snapshot_path) == FRACTYL_OK) {
+            // Load the index from the snapshot's index hash
+            if (load_snapshot_index(current_snapshot.index_hash, fractyl_dir, &prev_index) == FRACTYL_OK) {
+                prev_index_ptr = &prev_index;
+                printf("Comparing against snapshot %s (%s)...\n", current_snapshot_id, 
+                       current_snapshot.description ? current_snapshot.description : "no description");
+            }
+            json_free_snapshot(&current_snapshot);
+        }
+        free(current_snapshot_id);
     }
     
     // Scan current directory and build new index
@@ -367,36 +443,60 @@ int cmd_snapshot(int argc, char **argv) {
     
     printf("Scanning directory...\n");
     
-    result = scan_directory_recursive(repo_root, "", &new_index, fractyl_dir);
+    int result = scan_directory_recursive(repo_root, "", &new_index, prev_index_ptr, fractyl_dir);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to scan directory: %d\n", result);
         if (auto_message) free(auto_message);
         free(repo_root);
-        index_free(&current_index);
+        if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         return 1;
     }
     
     printf("Found %zu files\n", new_index.count);
     
-    // Check if there are changes (simple comparison for now)
-    if (current_index.count == new_index.count) {
-        // TODO: More sophisticated change detection
+    // Check if there are any actual changes
+    // Count files that are actually different
+    int changes_detected = 0;
+    for (size_t i = 0; i < new_index.count; i++) {
+        const index_entry_t *new_entry = &new_index.entries[i];
+        const index_entry_t *prev_entry = prev_index_ptr ? index_find_entry(prev_index_ptr, new_entry->path) : NULL;
+        
+        if (!prev_entry || memcmp(new_entry->hash, prev_entry->hash, 32) != 0) {
+            changes_detected++;
+        }
+    }
+    
+    // Also check for deleted files
+    if (prev_index_ptr) {
+        for (size_t i = 0; i < prev_index.count; i++) {
+            const index_entry_t *prev_entry = &prev_index.entries[i];
+            const index_entry_t *new_entry = index_find_entry(&new_index, prev_entry->path);
+            if (!new_entry) {
+                printf("  D %s\n", prev_entry->path);
+                changes_detected++;
+            }
+        }
+    }
+    
+    if (changes_detected == 0) {
         printf("No changes detected since last snapshot\n");
         if (auto_message) free(auto_message);
         free(repo_root);
-        index_free(&current_index);
+        if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         return 0;
     }
     
     // Save new index
+    char index_path[2048];
+    snprintf(index_path, sizeof(index_path), "%s/index", fractyl_dir);
     result = index_save(&new_index, index_path);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to save index: %d\n", result);
         if (auto_message) free(auto_message);
         free(repo_root);
-        index_free(&current_index);
+        if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         return 1;
     }
@@ -410,7 +510,7 @@ int cmd_snapshot(int argc, char **argv) {
         printf("Error: Failed to generate snapshot ID\n");
         if (auto_message) free(auto_message);
         free(repo_root);
-        index_free(&current_index);
+        if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         return 1;
     }
@@ -435,7 +535,7 @@ int cmd_snapshot(int argc, char **argv) {
         if (auto_message) free(auto_message);
         free(repo_root);
         json_free_snapshot(&snapshot);
-        index_free(&current_index);
+        if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         return 1;
     }
@@ -450,7 +550,7 @@ int cmd_snapshot(int argc, char **argv) {
         if (auto_message) free(auto_message);
         free(repo_root);
         json_free_snapshot(&snapshot);
-        index_free(&current_index);
+        if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         return 1;
     }
@@ -465,7 +565,7 @@ int cmd_snapshot(int argc, char **argv) {
         if (auto_message) free(auto_message);
         free(repo_root);
         json_free_snapshot(&snapshot);
-        index_free(&current_index);
+        if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         return 1;
     }
@@ -482,7 +582,7 @@ int cmd_snapshot(int argc, char **argv) {
         if (auto_message) free(auto_message);
         free(repo_root);
         json_free_snapshot(&snapshot);
-        index_free(&current_index);
+        if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         return 1;
     }
@@ -506,7 +606,7 @@ int cmd_snapshot(int argc, char **argv) {
     }
     free(repo_root);
     json_free_snapshot(&snapshot);
-    index_free(&current_index);
+    if (prev_index_ptr) index_free(&prev_index);
     index_free(&new_index);
     
     return 0;
