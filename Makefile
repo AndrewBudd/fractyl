@@ -14,31 +14,26 @@ BINDIR = .
 
 # Target executables
 TARGET = frac
-MCP_TARGET = frac-mcp
 
 # Source files
 MAIN_SRC = $(SRCDIR)/main.c
-MCP_MAIN_SRC = $(SRCDIR)/mcp_main.c
 UTILS_SRC = $(wildcard $(SRCDIR)/utils/*.c)
 CORE_SRC = $(wildcard $(SRCDIR)/core/*.c)
 COMMANDS_SRC = $(wildcard $(SRCDIR)/commands/*.c)
-MCP_SRC = $(wildcard $(SRCDIR)/mcp/*.c)
+DAEMON_SRC = $(wildcard $(SRCDIR)/daemon/*.c)
 XDIFF_SRC = $(wildcard $(SRCDIR)/vendor/xdiff/*.c)
 
-ALL_SRC = $(MAIN_SRC) $(UTILS_SRC) $(CORE_SRC) $(COMMANDS_SRC) $(XDIFF_SRC)
-MCP_ALL_SRC = $(MCP_MAIN_SRC) $(UTILS_SRC) $(CORE_SRC) $(COMMANDS_SRC) $(MCP_SRC) $(XDIFF_SRC)
+ALL_SRC = $(MAIN_SRC) $(UTILS_SRC) $(CORE_SRC) $(COMMANDS_SRC) $(DAEMON_SRC) $(XDIFF_SRC)
 
 # Object files (mirror source structure in obj directory)
 MAIN_OBJ = $(OBJDIR)/main.o
-MCP_MAIN_OBJ = $(OBJDIR)/mcp_main.o
 UTILS_OBJ = $(UTILS_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 CORE_OBJ = $(CORE_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 COMMANDS_OBJ = $(COMMANDS_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
-MCP_OBJ = $(MCP_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
+DAEMON_OBJ = $(DAEMON_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 XDIFF_OBJ = $(XDIFF_SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-ALL_OBJ = $(MAIN_OBJ) $(UTILS_OBJ) $(CORE_OBJ) $(COMMANDS_OBJ) $(XDIFF_OBJ)
-MCP_ALL_OBJ = $(MCP_MAIN_OBJ) $(UTILS_OBJ) $(CORE_OBJ) $(COMMANDS_OBJ) $(MCP_OBJ) $(XDIFF_OBJ)
+ALL_OBJ = $(MAIN_OBJ) $(UTILS_OBJ) $(CORE_OBJ) $(COMMANDS_OBJ) $(DAEMON_OBJ) $(XDIFF_OBJ)
 
 # Library detection (will be expanded)
 HAS_OPENSSL := $(shell pkg-config --exists openssl 2>/dev/null && echo yes)
@@ -74,14 +69,13 @@ ifeq ($(HAS_UUID),yes)
     INCLUDES += $(shell pkg-config --cflags uuid)
 endif
 
+# libuv dependency removed - daemon now uses simple timer approach
+
 # Default target
-all: $(TARGET) $(MCP_TARGET)
+all: $(TARGET)
 
 # Main targets
 $(TARGET): $(ALL_OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
-
-$(MCP_TARGET): $(MCP_ALL_OBJ)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 # Object file rules
@@ -95,21 +89,21 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)/utils
 	mkdir -p $(OBJDIR)/core
 	mkdir -p $(OBJDIR)/commands
-	mkdir -p $(OBJDIR)/mcp
+	mkdir -p $(OBJDIR)/daemon
 	mkdir -p $(OBJDIR)/vendor/xdiff
 
 # Debug build
 debug: CFLAGS += -DDEBUG -O0
-debug: $(TARGET) $(MCP_TARGET)
+debug: $(TARGET)
 
 # Release build
 release: CFLAGS += -O2 -DNDEBUG
-release: $(TARGET) $(MCP_TARGET)
+release: $(TARGET)
 
 # Clean
 clean:
 	rm -rf $(OBJDIR)
-	rm -f $(TARGET) $(MCP_TARGET)
+	rm -f $(TARGET)
 
 # Installation variables
 PREFIX ?= /usr/local
@@ -139,6 +133,7 @@ check-deps:
 	@which pkg-config > /dev/null || (echo "WARNING: pkg-config not found")
 	@echo "OpenSSL: $(if $(HAS_OPENSSL),found,not found)"
 	@echo "cJSON: $(if $(HAS_CJSON),found,not found)"
+	@echo "UUID: $(if $(HAS_UUID),found,not found)"
 	@echo "Dependencies check complete."
 
 # Show build configuration
