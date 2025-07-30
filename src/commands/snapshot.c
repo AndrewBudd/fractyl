@@ -5,6 +5,8 @@
 #include "../core/hash.h"
 #include "../utils/json.h"
 #include "../utils/fs.h"
+#include "../utils/git.h"
+#include "../utils/paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -133,12 +135,15 @@ static int scan_directory_recursive(const char *dir_path, const char *relative_p
 }
 
 // Find the most recent snapshot to use as parent
-static char* find_latest_snapshot(const char *fractyl_dir) {
-    char snapshots_dir[2048];
-    snprintf(snapshots_dir, sizeof(snapshots_dir), "%s/snapshots", fractyl_dir);
+static char* find_latest_snapshot(const char *fractyl_dir, const char *branch) {
+    char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, branch);
+    if (!snapshots_dir) {
+        return NULL;
+    }
     
     DIR *d = opendir(snapshots_dir);
     if (!d) {
+        free(snapshots_dir);
         return NULL; // No snapshots directory or can't open
     }
     
@@ -168,25 +173,31 @@ static char* find_latest_snapshot(const char *fractyl_dir) {
     }
     
     closedir(d);
+    free(snapshots_dir);
     return latest_id; // Caller must free
 }
 
 // Get current snapshot ID from CURRENT file
-static char* get_current_snapshot_id(const char *fractyl_dir) {
-    char current_path[2048];
-    snprintf(current_path, sizeof(current_path), "%s/CURRENT", fractyl_dir);
+static char* get_current_snapshot_id(const char *fractyl_dir, const char *branch) {
+    char *current_path = paths_get_current_file(fractyl_dir, branch);
+    if (!current_path) {
+        return NULL;
+    }
     
     FILE *f = fopen(current_path, "r");
     if (!f) {
+        free(current_path);
         return NULL;
     }
     
     char current_id[64];
     if (!fgets(current_id, sizeof(current_id), f)) {
         fclose(f);
+        free(current_path);
         return NULL;
     }
     fclose(f);
+    free(current_path);
     
     // Strip newline
     size_t len = strlen(current_id);
@@ -209,7 +220,7 @@ static void generate_short_hash(const char *snapshot_id, char *short_hash, size_
 }
 
 // Check if we're creating a divergent branch
-static int is_divergent_branch(const char *fractyl_dir, const char *current_id, const char *latest_id) {
+static int is_divergent_branch(const char *fractyl_dir, const char *branch, const char *current_id, const char *latest_id) {
     if (!current_id || !latest_id) {
         return 0; // Not divergent if we don't have both IDs
     }
@@ -219,8 +230,14 @@ static int is_divergent_branch(const char *fractyl_dir, const char *current_id, 
     }
     
     // Load latest snapshot to check its parent
+    char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, branch);
+    if (!snapshots_dir) {
+        return 0;
+    }
+    
     char latest_path[2048];
-    snprintf(latest_path, sizeof(latest_path), "%s/snapshots/%s.json", fractyl_dir, latest_id);
+    snprintf(latest_path, sizeof(latest_path), "%s/%s.json", snapshots_dir, latest_id);
+    free(snapshots_dir);
     
     snapshot_t latest_snapshot;
     if (json_load_snapshot(&latest_snapshot, latest_path) != FRACTYL_OK) {
@@ -237,9 +254,9 @@ static int is_divergent_branch(const char *fractyl_dir, const char *current_id, 
 }
 
 // Generate auto-description based on parent description +n format, with divergence detection
-static char* generate_auto_description(const char *fractyl_dir) {
-    char *latest_id = find_latest_snapshot(fractyl_dir);
-    char *current_id = get_current_snapshot_id(fractyl_dir);
+static char* generate_auto_description(const char *fractyl_dir, const char *branch) {
+    char *latest_id = find_latest_snapshot(fractyl_dir, branch);
+    char *current_id = get_current_snapshot_id(fractyl_dir, branch);
     
     if (!latest_id) {
         // First snapshot
@@ -248,12 +265,21 @@ static char* generate_auto_description(const char *fractyl_dir) {
     }
     
     // Check if this is a divergent branch
-    int divergent = is_divergent_branch(fractyl_dir, current_id, latest_id);
+    int divergent = is_divergent_branch(fractyl_dir, branch, current_id, latest_id);
     
     // Load the snapshot we're building from (current, not latest)
     char *parent_id = current_id ? current_id : latest_id;
+    
+    char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, branch);
+    if (!snapshots_dir) {
+        free(latest_id);
+        free(current_id);
+        return strdup("working +1");
+    }
+    
     char parent_path[2048];
-    snprintf(parent_path, sizeof(parent_path), "%s/snapshots/%s.json", fractyl_dir, parent_id);
+    snprintf(parent_path, sizeof(parent_path), "%s/%s.json", snapshots_dir, parent_id);
+    free(snapshots_dir);
     
     snapshot_t parent_snapshot;
     if (json_load_snapshot(&parent_snapshot, parent_path) != FRACTYL_OK) {
@@ -407,32 +433,44 @@ int cmd_snapshot(int argc, char **argv) {
     char fractyl_dir[2048];
     snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", repo_root);
     
+    // Get current git branch
+    char *git_branch = paths_get_current_branch(repo_root);
+    
+    // Migrate legacy snapshots if needed (first time on a branch)
+    if (git_branch) {
+        paths_migrate_legacy_snapshots(fractyl_dir, git_branch);
+    }
+    
     // Generate auto description if no message provided
     if (!message) {
-        auto_message = generate_auto_description(fractyl_dir);
+        auto_message = generate_auto_description(fractyl_dir, git_branch);
         message = auto_message;
         printf("Auto-generating description: \"%s\"\n", message);
     }
     
     // Load previous snapshot's index for comparison
-    char *current_snapshot_id = get_current_snapshot_id(fractyl_dir);
+    char *current_snapshot_id = get_current_snapshot_id(fractyl_dir, git_branch);
     index_t prev_index;
     index_t *prev_index_ptr = NULL;
     
     if (current_snapshot_id) {
         // Load the current snapshot to get its index hash
-        char current_snapshot_path[2048];
-        snprintf(current_snapshot_path, sizeof(current_snapshot_path), "%s/snapshots/%s.json", fractyl_dir, current_snapshot_id);
-        
-        snapshot_t current_snapshot;
-        if (json_load_snapshot(&current_snapshot, current_snapshot_path) == FRACTYL_OK) {
-            // Load the index from the snapshot's index hash
-            if (load_snapshot_index(current_snapshot.index_hash, fractyl_dir, &prev_index) == FRACTYL_OK) {
-                prev_index_ptr = &prev_index;
-                printf("Comparing against snapshot %s (%s)...\n", current_snapshot_id, 
-                       current_snapshot.description ? current_snapshot.description : "no description");
+        char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, git_branch);
+        if (snapshots_dir) {
+            char current_snapshot_path[2048];
+            snprintf(current_snapshot_path, sizeof(current_snapshot_path), "%s/%s.json", snapshots_dir, current_snapshot_id);
+            free(snapshots_dir);
+            
+            snapshot_t current_snapshot;
+            if (json_load_snapshot(&current_snapshot, current_snapshot_path) == FRACTYL_OK) {
+                // Load the index from the snapshot's index hash
+                if (load_snapshot_index(current_snapshot.index_hash, fractyl_dir, &prev_index) == FRACTYL_OK) {
+                    prev_index_ptr = &prev_index;
+                    printf("Comparing against snapshot %s (%s)...\n", current_snapshot_id, 
+                           current_snapshot.description ? current_snapshot.description : "no description");
+                }
+                json_free_snapshot(&current_snapshot);
             }
-            json_free_snapshot(&current_snapshot);
         }
         free(current_snapshot_id);
     }
@@ -519,8 +557,20 @@ int cmd_snapshot(int argc, char **argv) {
     snapshot.description = strdup(message);
     snapshot.timestamp = time(NULL);
     
+    // Add git information
+    if (git_branch) {
+        snapshot.git_branch = strdup(git_branch);
+        snapshot.git_commit = git_get_current_commit(repo_root);
+        snapshot.git_dirty = git_has_uncommitted_changes(repo_root);
+        
+        if (snapshot.git_commit) {
+            printf("Git branch: %s (commit: %.7s%s)\n", git_branch, snapshot.git_commit,
+                   snapshot.git_dirty ? ", uncommitted changes" : "");
+        }
+    }
+    
     // Find parent snapshot (most recent one)
-    char *parent_id = find_latest_snapshot(fractyl_dir);
+    char *parent_id = find_latest_snapshot(fractyl_dir, git_branch);
     if (parent_id) {
         snapshot.parent = parent_id; // Transfer ownership to snapshot
     }
@@ -571,11 +621,27 @@ int cmd_snapshot(int argc, char **argv) {
     }
     
     // Save snapshot metadata
+    char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, git_branch);
+    if (!snapshots_dir) {
+        printf("Error: Failed to get snapshots directory\n");
+        free(snapshot_id);
+        if (auto_message) free(auto_message);
+        free(repo_root);
+        free(git_branch);
+        json_free_snapshot(&snapshot);
+        if (prev_index_ptr) index_free(&prev_index);
+        index_free(&new_index);
+        return 1;
+    }
+    
+    // Ensure snapshots directory exists
+    paths_ensure_directory(snapshots_dir);
+    
     char snapshot_path[2048];
-    snprintf(snapshot_path, sizeof(snapshot_path), "%s/snapshots/%s.json", 
-             fractyl_dir, snapshot_id);
+    snprintf(snapshot_path, sizeof(snapshot_path), "%s/%s.json", snapshots_dir, snapshot_id);
     
     result = json_save_snapshot(&snapshot, snapshot_path);
+    free(snapshots_dir);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to save snapshot: %d\n", result);
         free(snapshot_id);
@@ -588,12 +654,23 @@ int cmd_snapshot(int argc, char **argv) {
     }
     
     // Update CURRENT file
-    char current_path[2048];
-    snprintf(current_path, sizeof(current_path), "%s/CURRENT", fractyl_dir);
-    FILE *current_file = fopen(current_path, "w");
-    if (current_file) {
-        fprintf(current_file, "%s\n", snapshot_id);
-        fclose(current_file);
+    char *current_path = paths_get_current_file(fractyl_dir, git_branch);
+    if (current_path) {
+        // Ensure parent directory exists
+        char *parent_dir = strdup(current_path);
+        char *last_slash = strrchr(parent_dir, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            paths_ensure_directory(parent_dir);
+        }
+        free(parent_dir);
+        
+        FILE *current_file = fopen(current_path, "w");
+        if (current_file) {
+            fprintf(current_file, "%s\n", snapshot_id);
+            fclose(current_file);
+        }
+        free(current_path);
     }
     
     printf("Created snapshot %s: \"%s\"\n", snapshot_id, message);
@@ -605,6 +682,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(auto_message);
     }
     free(repo_root);
+    free(git_branch);
     json_free_snapshot(&snapshot);
     if (prev_index_ptr) index_free(&prev_index);
     index_free(&new_index);

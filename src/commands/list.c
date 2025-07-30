@@ -1,6 +1,8 @@
 #include "../include/commands.h"
 #include "../include/core.h"
 #include "../utils/json.h"
+#include "../utils/paths.h"
+#include "../utils/git.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +24,9 @@ typedef struct tree_node {
     char *parent_id;
     char *description;
     time_t timestamp;
+    char *git_branch;
+    char *git_commit;
+    int git_dirty;
     struct tree_node **children;
     size_t child_count;
     size_t child_capacity;
@@ -67,7 +72,21 @@ static void print_snapshot(tree_node_t *node, const char *prefix, const char *co
     
     printf("%s%s%s ", prefix, connector, short_id);
     print_timestamp(node->timestamp);
-    printf(" %s\n", node->description ? node->description : "");
+    printf(" %s", node->description ? node->description : "");
+    
+    // Add git info if available
+    if (node->git_branch) {
+        printf(" [%s", node->git_branch);
+        if (node->git_commit) {
+            printf(" @ %.7s", node->git_commit);
+        }
+        if (node->git_dirty) {
+            printf("*");
+        }
+        printf("]");
+    }
+    
+    printf("\n");
 }
 
 // Print the tree structure - linear chains straight down, branches indented
@@ -121,6 +140,8 @@ static void free_tree_node(tree_node_t *node) {
     free(node->children);
     free(node->parent_id);
     free(node->description);
+    free(node->git_branch);
+    free(node->git_commit);
     free(node);
 }
 
@@ -137,13 +158,23 @@ int cmd_list(int argc, char **argv) {
     char fractyl_dir[2048];
     snprintf(fractyl_dir, sizeof(fractyl_dir), "%s/.fractyl", repo_root);
     
-    // Open snapshots directory
-    char snapshots_dir[2048];
-    snprintf(snapshots_dir, sizeof(snapshots_dir), "%s/snapshots", fractyl_dir);
+    // Get current git branch
+    char *git_branch = paths_get_current_branch(repo_root);
+    
+    // Get branch-aware snapshots directory
+    char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, git_branch);
+    if (!snapshots_dir) {
+        printf("Error: Failed to get snapshots directory\n");
+        free(repo_root);
+        free(git_branch);
+        return 1;
+    }
     
     DIR *d = opendir(snapshots_dir);
     if (!d) {
         printf("No snapshots found\n");
+        free(snapshots_dir);
+        free(git_branch);
         free(repo_root);
         return 0;
     }
@@ -192,6 +223,9 @@ int cmd_list(int argc, char **argv) {
         node->parent_id = snapshot.parent ? strdup(snapshot.parent) : NULL;
         node->description = snapshot.description ? strdup(snapshot.description) : NULL;
         node->timestamp = snapshot.timestamp;
+        node->git_branch = snapshot.git_branch ? strdup(snapshot.git_branch) : NULL;
+        node->git_commit = snapshot.git_commit ? strdup(snapshot.git_commit) : NULL;
+        node->git_dirty = snapshot.git_dirty;
         node->children = NULL;
         node->child_count = 0;
         node->child_capacity = 0;
@@ -209,6 +243,8 @@ int cmd_list(int argc, char **argv) {
     
     if (node_count == 0) {
         printf("No snapshots found\n");
+        free(snapshots_dir);
+        free(git_branch);
         free(repo_root);
         return 0;
     }
@@ -267,6 +303,8 @@ int cmd_list(int argc, char **argv) {
     }
     free(all_nodes);
     free(roots);
+    free(snapshots_dir);
+    free(git_branch);
     free(repo_root);
     
     return 0;

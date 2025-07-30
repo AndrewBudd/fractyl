@@ -27,6 +27,10 @@ typedef struct {
     unsigned char index_hash[32];
     char **git_status;
     size_t git_status_count;
+    // Git-related fields
+    char *git_branch;
+    char *git_commit;
+    int git_dirty;  // 1 if there are uncommitted changes, 0 otherwise
 } snapshot_t;
 
 typedef struct {

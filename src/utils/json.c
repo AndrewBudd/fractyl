@@ -57,6 +57,15 @@ char* json_serialize_snapshot(const snapshot_t *snapshot) {
     } else {
         cJSON_AddItemToObject(json, "git_status", cJSON_CreateArray());
     }
+    
+    // Add git metadata
+    if (snapshot->git_branch) {
+        cJSON_AddStringToObject(json, "git_branch", snapshot->git_branch);
+    }
+    if (snapshot->git_commit) {
+        cJSON_AddStringToObject(json, "git_commit", snapshot->git_commit);
+    }
+    cJSON_AddBoolToObject(json, "git_dirty", snapshot->git_dirty);
 
     char *json_string = cJSON_Print(json);
     cJSON_Delete(json);
@@ -129,6 +138,22 @@ int json_deserialize_snapshot(const char *json_str, snapshot_t *snapshot) {
                 }
             }
         }
+    }
+    
+    // Parse git metadata
+    cJSON *git_branch = cJSON_GetObjectItem(json, "git_branch");
+    if (cJSON_IsString(git_branch) && git_branch->valuestring) {
+        snapshot->git_branch = strdup(git_branch->valuestring);
+    }
+    
+    cJSON *git_commit = cJSON_GetObjectItem(json, "git_commit");
+    if (cJSON_IsString(git_commit) && git_commit->valuestring) {
+        snapshot->git_commit = strdup(git_commit->valuestring);
+    }
+    
+    cJSON *git_dirty = cJSON_GetObjectItem(json, "git_dirty");
+    if (cJSON_IsBool(git_dirty)) {
+        snapshot->git_dirty = cJSON_IsTrue(git_dirty) ? 1 : 0;
     }
 
     cJSON_Delete(json);
@@ -211,6 +236,8 @@ void json_free_snapshot(snapshot_t *snapshot) {
 
     free(snapshot->parent);
     free(snapshot->description);
+    free(snapshot->git_branch);
+    free(snapshot->git_commit);
 
     if (snapshot->git_status) {
         for (size_t i = 0; i < snapshot->git_status_count; i++) {
