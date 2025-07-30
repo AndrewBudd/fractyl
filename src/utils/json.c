@@ -61,9 +61,13 @@ char* json_serialize_snapshot(const snapshot_t *snapshot) {
     // Add git metadata
     if (snapshot->git_branch) {
         cJSON_AddStringToObject(json, "git_branch", snapshot->git_branch);
+    } else {
+        cJSON_AddNullToObject(json, "git_branch");
     }
     if (snapshot->git_commit) {
         cJSON_AddStringToObject(json, "git_commit", snapshot->git_commit);
+    } else {
+        cJSON_AddNullToObject(json, "git_commit");
     }
     cJSON_AddBoolToObject(json, "git_dirty", snapshot->git_dirty);
 
