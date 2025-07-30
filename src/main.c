@@ -24,6 +24,7 @@ int main(int argc, char **argv) {
         printf("  list                   List all snapshots\n");
         printf("  delete <snapshot-id>   Delete a snapshot\n");
         printf("  diff <snap-a> <snap-b> Compare two snapshots\n");
+        printf("  show <snapshot-id>     Show detailed snapshot info\n");
         printf("  daemon <command>       Manage background daemon\n");
         printf("  --test-utils           Run utility tests\n");
         printf("Options:\n");
@@ -70,6 +71,8 @@ int main(int argc, char **argv) {
             return cmd_delete(argc, argv);
         } else if (strcmp(opts.command, "diff") == 0) {
             return cmd_diff(argc, argv);
+        } else if (strcmp(opts.command, "show") == 0) {
+            return cmd_show(argc, argv);
         } else if (strcmp(opts.command, "daemon") == 0) {
             return cmd_daemon(argc, argv);
         } else {

@@ -202,3 +202,66 @@ int gitignore_should_ignore_path(const char *repo_root, const char *full_path, c
     
     return gitignore_should_ignore(repo_root, relative_path, is_directory);
 }
+
+// Check if a path should be ignored according to fractylignore rules
+int fractylignore_should_ignore(const char *repo_root, const char *relative_path, int is_directory) {
+    if (!repo_root || !relative_path) {
+        return 0;
+    }
+    
+    // Always ignore .fractyl directory
+    if (strcmp(relative_path, ".fractyl") == 0 || strstr(relative_path, ".fractyl/") == relative_path) {
+        return 1;
+    }
+    
+    char fractylignore_path[2048];
+    snprintf(fractylignore_path, sizeof(fractylignore_path), "%s/.fractylignore", repo_root);
+    
+    gitignore_t *gi = parse_gitignore_file(fractylignore_path);
+    if (!gi) {
+        return 0;  // No .fractylignore file or couldn't parse it
+    }
+    
+    int ignored = 0;
+    
+    // Apply rules in order
+    for (size_t i = 0; i < gi->count; i++) {
+        gitignore_rule_t *rule = &gi->rules[i];
+        
+        if (matches_pattern(relative_path, rule, is_directory)) {
+            if (rule->is_negation) {
+                ignored = 0;  // Negation rule - don't ignore
+            } else {
+                ignored = 1;  // Regular rule - ignore
+            }
+        }
+    }
+    
+    free_gitignore(gi);
+    return ignored;
+}
+
+// Check if a path should be ignored by EITHER gitignore OR fractylignore rules
+int should_ignore_path(const char *repo_root, const char *full_path, const char *relative_path) {
+    if (!repo_root || !full_path || !relative_path) {
+        return 0;
+    }
+    
+    struct stat st;
+    int is_directory = 0;
+    if (stat(full_path, &st) == 0) {
+        is_directory = S_ISDIR(st.st_mode);
+    }
+    
+    // Check gitignore rules first
+    if (gitignore_should_ignore(repo_root, relative_path, is_directory)) {
+        return 1;
+    }
+    
+    // Check fractylignore rules
+    if (fractylignore_should_ignore(repo_root, relative_path, is_directory)) {
+        return 1;
+    }
+    
+    return 0;
+}

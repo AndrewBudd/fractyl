@@ -55,8 +55,8 @@ static int scan_directory_recursive(const char *dir_path, const char *relative_p
             continue;
         }
         
-        // Check if this path should be ignored according to .gitignore
-        if (gitignore_should_ignore_path(repo_root, full_path, rel_path)) {
+        // Check if this path should be ignored according to .gitignore or .fractylignore
+        if (should_ignore_path(repo_root, full_path, rel_path)) {
             continue;  // Skip ignored files/directories
         }
 

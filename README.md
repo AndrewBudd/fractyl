@@ -137,8 +137,8 @@ frac delete a1b2c3d4
 # Compare two snapshots
 frac diff snapshot1 snapshot2
 
-# Show changes since last snapshot
-frac diff HEAD~1 HEAD
+# Show changes since last snapshot  
+frac diff -2 -1
 
 # View specific snapshot details
 frac show a1b2c3d4
