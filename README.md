@@ -1,356 +1,528 @@
 # Fractyl
 
-A content-addressable file snapshot tool inspired by Git, written in GNU99 C for maximum portability and performance. Fractyl creates efficient, local-only snapshots of your working directory while respecting `.gitignore` patterns.
+A powerful content-addressable version control system optimized for large files and non-git workflows. Fractyl creates efficient snapshots of directory states using SHA-256 hashing and deduplication, with intelligent git branch awareness and automated daemon mode.
 
-## Overview
+## Key Features
 
-Fractyl stores file snapshots using content-addressable storage in a `.fractyl/` directory. Each file is hashed (SHA-256) and stored by its hash, enabling efficient deduplication and integrity verification. The tool maintains a DAG (Directed Acyclic Graph) of snapshots, allowing you to track the evolution of your project over time.
+- 📸 **Snapshot-based versioning** - capture directory state at any point in time
+- 🔧 **Git branch-aware storage** - separate snapshots per git branch automatically  
+- 🤖 **Background daemon mode** - automatic snapshots every 3 minutes (configurable)
+- 🔒 **File locking system** - prevents conflicts between daemon and manual operations
+- 📊 **Content deduplication** - only stores changed files using SHA-256 hashing
+- 🚀 **Fast operations** - optimized for large repositories and frequent snapshots
+- ⚡ **Smart snapshot naming** - automatic incremental naming with `./frac` shortcut
+- 🧪 **Comprehensive testing** - Unity-based test suite with high code coverage
 
-### Key Features
+## Quick Start
 
-- **Content-addressable storage**: Files are stored by their SHA-256 hash, eliminating duplicates
-- **Git integration**: Respects `.gitignore` files and captures Git status in snapshots
-- **Efficient snapshots**: Only stores changed files, with hard links for unchanged content
-- **Tree-based listing**: View snapshot history as a branching tree
-- **Local-only**: No network dependencies, all data stays on your machine
-- **C implementation**: Fast, portable, minimal dependencies
+```bash
+# Build and install
+make && sudo make install
+
+# Initialize repository (optional - happens automatically)
+frac init
+
+# Start daemon for automatic snapshots every 3 minutes
+frac daemon start
+
+# Create manual snapshot with message
+frac snapshot -m "Added new feature"
+
+# Quick snapshot with auto-incrementing name
+./frac  # Creates "working +1", "working +2", etc.
+
+# List all snapshots
+frac list
+
+# Restore to a specific snapshot
+frac restore a1b2c3d4
+
+# Stop daemon when done
+frac daemon stop
+```
 
 ## Installation
 
-### Prerequisites
+### Dependencies
 
-- GCC with C99 support
-- OpenSSL development libraries
-- cJSON library (optional, enables JSON features)
-- pkg-config (recommended)
+- **GCC** with C99 support
+- **libssl-dev** (OpenSSL for SHA-256 hashing)
+- **libcjson-dev** (JSON handling)
+- **uuid-dev** (UUID generation)
 
-### Building from Source
+### Build and Install
 
 ```bash
-# Clone or download the source
-cd fractyl/
-
 # Check dependencies
 make check-deps
 
-# Build the project
-make
+# Clean build
+make clean && make
 
 # Run tests
 make test
 
-# Install (optional)
+# Install system-wide
 sudo make install
+
+# Or run locally
+./frac --help
 ```
 
-### Build Configuration
+## Core Commands
 
-The build system automatically detects available libraries:
+### Daemon Management
 
-- **OpenSSL**: Required for SHA-256 hashing
-- **cJSON**: Optional, enables JSON output formats
-- **UUID**: Optional, for generating snapshot IDs
-
-Run `make config` to see your current build configuration.
-
-## Usage
-
-### Initialize a Repository
-
-Fractyl works in any directory. No explicit initialization is required - the `.fractyl/` directory is created on first use.
-
-### Creating Snapshots
+The daemon is Fractyl's key feature for automated development workflows:
 
 ```bash
-# Create a snapshot with a message
-fractyl snapshot -m "Initial project state"
+# Start daemon (default 3-minute interval)
+frac daemon start
 
-# Create a snapshot with debug output
-fractyl snapshot -m "Added new feature" --debug
+# Start with custom interval (60 seconds)
+frac daemon start -i 60
+
+# Check daemon status
+frac daemon status
+
+# Restart daemon with new settings
+frac daemon restart -i 120
+
+# Stop daemon
+frac daemon stop
+
+# View daemon activity
+cat .fractyl/daemon.log
+tail -f .fractyl/daemon.log
 ```
 
-### Listing Snapshots
+**Daemon Features:**
+- 🔄 Creates snapshots only when files actually change
+- 🔒 Uses file locking to prevent conflicts with manual commands
+- 📝 Detailed logging of all activity
+- 🛡️ Robust error handling and automatic recovery
+- ⏱️ Configurable snapshot intervals (minimum 10 seconds)
+
+### Snapshot Management
 
 ```bash
-# Show all snapshots in tree format
-fractyl list
+# Manual snapshot with descriptive message
+frac snapshot -m "Fixed memory leak in hash.c"
 
-# Example output:
-# * a1b2c3d4  "Initial project state" (2024-01-15 10:30:00)
-# |\
-# | * b2c3d4e5  "Added new feature" (2024-01-15 11:45:00)
-# |/
-# * c3d4e5f6  "Bug fixes" (2024-01-15 14:20:00)
+# Quick auto-named snapshot (creates "working +1", "working +2", etc.)
+./frac
+
+# List all snapshots (most recent first)
+frac list
+
+# List with more details
+frac list --verbose
+
+# Restore to specific snapshot
+frac restore a1b2c3d4
+
+# Restore to previous snapshot
+frac restore -1
+
+# Restore to 2 snapshots ago
+frac restore -2
+
+# Delete old snapshot
+frac delete a1b2c3d4
 ```
 
-### Restoring Snapshots
+### Comparison and Analysis
 
 ```bash
-# Restore to a specific snapshot
-fractyl restore a1b2c3d4
+# Compare two snapshots
+frac diff snapshot1 snapshot2
 
-# Force restore (removes untracked files)
-fractyl restore a1b2c3d4 --force
+# Show changes since last snapshot
+frac diff HEAD~1 HEAD
+
+# View specific snapshot details
+frac show a1b2c3d4
 ```
 
-### Deleting Snapshots
+## Git Integration
 
-```bash
-# Delete a snapshot (keeps objects if referenced elsewhere)
-fractyl delete a1b2c3d4
-```
+Fractyl is **git branch-aware** and automatically organizes snapshots per branch:
 
-### Additional Commands
-
-```bash
-# Show help
-fractyl --help
-
-# Show version
-fractyl --version
-
-# Run utility tests
-fractyl --test-utils
-```
-
-## Architecture
-
-### Directory Structure
+### Branch-Specific Storage
 
 ```
 .fractyl/
-├── objects/                     # Content-addressable storage
-│   └── <first 2 chars>/
-│       └── <remaining hash>     # File blobs stored by SHA-256
-├── index                        # Current working directory state
-├── snapshots/
-│   └── <snapshot-id>.json       # Snapshot metadata
-└── snapshot-graph.json          # DAG of snapshot relationships
+├── refs/heads/master/
+│   ├── snapshots/           # Master branch snapshots
+│   └── CURRENT             # Current snapshot for master
+├── refs/heads/feature/
+│   ├── snapshots/           # Feature branch snapshots  
+│   └── CURRENT             # Current snapshot for feature
+└── objects/                # Shared object storage
 ```
 
-### Core Data Structures
+### Git Status Capture
 
-#### Index Entry
-```c
-typedef struct {
-    char *path;                 // Relative path from repo root
-    unsigned char hash[32];     // SHA-256 hash
-    mode_t mode;                // File permissions
-    off_t size;                 // File size
-    time_t mtime;               // Modification time
-} index_entry_t;
+Each snapshot automatically captures:
+- Current git branch name
+- Latest commit hash
+- Uncommitted changes status
+- Working directory state
+
+```bash
+# Switch git branches - Fractyl automatically separates snapshots
+git checkout feature-branch
+frac snapshot -m "Feature implementation"
+
+git checkout master  
+frac list  # Shows only master branch snapshots
 ```
 
-#### Snapshot Metadata
-```c
-typedef struct {
-    char id[64];                // UUID or hash
-    char *parent;               // Parent snapshot ID (nullable)
-    char *description;          // User description
-    time_t timestamp;           // Creation time
-    unsigned char index_hash[32]; // Hash of index at snapshot time
-    char **git_status;          // Array of git status lines
-    size_t git_status_count;
-} snapshot_t;
+## Directory Structure
+
+```
+.fractyl/
+├── objects/                          # Content-addressable object storage
+│   └── <first-2-chars>/
+│       └── <remaining-hash>          # File blobs by SHA-256
+├── refs/heads/<branch>/              # Branch-specific data
+│   ├── snapshots/
+│   │   └── <snapshot-id>.json        # Snapshot metadata
+│   └── CURRENT                       # Current snapshot ID
+├── daemon.pid                        # Daemon process ID
+├── daemon.log                        # Daemon activity log
+├── fractyl.lock                      # Concurrency control
+└── config.json                       # Repository configuration
 ```
 
-### Ignore Rules
+## Advanced Usage
 
-Fractyl respects the following ignore patterns:
-- `.gitignore` files (standard Git ignore syntax)
-- `.fractylignore` files (same syntax as .gitignore)
-- Always ignores: `.fractyl/`, `.git/`
+### File Locking and Concurrency
 
-### File Size Limits
+Fractyl uses sophisticated file locking to handle concurrent access:
 
-- Files larger than 1GB are excluded from snapshots
-- Large files are noted in the index but not stored
-- This prevents the object store from becoming unwieldy
+- 🔒 **Manual commands** wait up to 30 seconds for daemon to finish
+- 🤖 **Daemon** uses non-blocking locks and skips cycles if busy
+- 🧹 **Automatic cleanup** removes stale locks from dead processes
 
-## Implementation Details
+```bash
+# Force remove stale lock (if daemon PID not running)
+rm .fractyl/fractyl.lock
 
-### Hash Algorithm
+# Check for lock conflicts
+ls -la .fractyl/fractyl.lock
+```
 
-Uses SHA-256 for content addressing:
-- Cryptographically secure
-- Extremely low collision probability
-- Standard library support via OpenSSL
+### Ignore Patterns
 
-### Object Storage
+Fractyl respects multiple ignore mechanisms:
 
-Files are stored in `.fractyl/objects/` using a two-level directory structure:
-- First 2 characters of hash → subdirectory
-- Remaining characters → filename
-- Example: `deadbeef123...` → `.fractyl/objects/de/adbeef123...`
+- `.gitignore` files (standard Git syntax)
+- `.fractylignore` files (same syntax)
+- Always ignores: `.fractyl/`, `.git/`, `node_modules/`
 
-### Snapshot Creation Process
+### Performance Optimization
 
-1. Load current index from disk
-2. Walk working directory, respecting ignore rules
-3. Compare files with index (using stat + hash for changed files)
-4. Store new/changed objects in content-addressable storage
-5. Update index with new file states
-6. Create snapshot metadata including Git status (if available)
-7. Update snapshot graph with parent relationships
+- **Content deduplication**: Identical files shared across snapshots
+- **Incremental snapshots**: Only processes changed files
+- **Smart indexing**: Uses file stat info to detect changes quickly
+- **Efficient storage**: Two-level directory structure prevents filesystem limits
 
-### Error Handling
+## Testing and Quality
 
-Comprehensive error handling with specific error codes:
-- `FRACTYL_OK`: Success
-- `FRACTYL_ERROR_IO`: File I/O errors
-- `FRACTYL_ERROR_OUT_OF_MEMORY`: Memory allocation failures
-- `FRACTYL_ERROR_SNAPSHOT_NOT_FOUND`: Invalid snapshot ID
-- `FRACTYL_ERROR_HASH_MISMATCH`: Corruption detected
+### Test Suite
+
+Fractyl includes comprehensive testing using the Unity framework:
+
+```bash
+# Run all tests
+make test
+
+# Run only unit tests
+make unit-tests
+
+# Run with coverage analysis
+make coverage
+
+# View HTML coverage report
+make coverage-html
+open coverage-html/index.html
+```
+
+**Test Coverage:**
+- ✅ Core functionality (hash, objects, index)
+- ✅ Command-line interface and parsing
+- ✅ File system operations and utilities
+- ✅ Daemon operations and concurrency
+- ✅ Git integration and branch handling
+
+### Code Quality
+
+- **C99 standard** with GNU extensions
+- **Memory safety** with comprehensive cleanup
+- **Error handling** for all system calls
+- **Compiler warnings** enabled (`-Wall -Wextra -Werror`)
+- **Static analysis** compatible
+
+## Development Workflow Integration
+
+### Recommended Workflow
+
+```bash
+# 1. Start daemon for automatic snapshots
+frac daemon start
+
+# 2. Work on your code
+# ... edit files ...
+
+# 3. Quick checkpoint
+./frac  # Auto-named snapshot
+
+# 4. Major milestone
+frac snapshot -m "Complete feature X implementation"
+
+# 5. If something breaks
+frac list              # See recent snapshots
+frac restore a1b2c3d4  # Go back to working state
+
+# 6. End of session
+frac daemon stop
+```
+
+### Snapshot Naming Strategies
+
+- **Manual snapshots**: Descriptive messages
+  ```bash
+  frac snapshot -m "Fix memory leak in parser"
+  frac snapshot -m "Add unit tests for hash module"
+  ```
+
+- **Auto snapshots**: Incremental naming
+  ```bash
+  ./frac  # Creates "working +1"
+  ./frac  # Creates "working +2"
+  ```
+
+- **Daemon snapshots**: Automatic timestamped
+  ```bash
+  # Daemon creates: "Auto-snapshot 2025-07-29 22:40:13"
+  ```
 
 ## Build System
 
 ### Makefile Targets
 
-- `make` or `make all`: Build the executable
-- `make debug`: Build with debug symbols and verbose output
-- `make release`: Build optimized release version
-- `make clean`: Remove build artifacts
-- `make test`: Run basic functionality tests
-- `make install`: Install to system PATH
-- `make check-deps`: Verify required dependencies
-- `make config`: Display build configuration
-- `make help`: Show all available targets
+```bash
+# Development
+make                    # Build executable
+make debug              # Debug build with symbols
+make clean              # Remove build artifacts
+make config             # Show build configuration
+
+# Testing
+make test               # Run all tests
+make unit-tests         # Unit tests only
+make integration-tests  # Integration tests only
+make coverage           # Generate coverage report
+make coverage-html      # HTML coverage report
+
+# Installation
+make install            # Install system-wide
+make uninstall          # Remove from system
+make check-deps         # Verify dependencies
+
+# Help
+make help               # Show all targets
+```
 
 ### Build Configuration
 
-The build system features:
-- Automatic dependency detection
-- Modular compilation with object files in `o/` directory
-- Separate debug/release configurations
-- Cross-platform compatibility
-- Library detection via pkg-config
+The build system automatically detects libraries:
 
-## Development
+- **OpenSSL**: Required for SHA-256 hashing
+- **cJSON**: JSON serialization and metadata
+- **UUID**: Snapshot ID generation
+- **Unity**: Test framework (included)
 
-### Project Structure
+## Architecture
 
+### Core Components
+
+1. **Object Storage** (`src/core/objects.c`)
+   - Content-addressable storage using SHA-256
+   - Two-level directory structure for scalability
+   - Deduplication and integrity verification
+
+2. **Index Management** (`src/core/index.c`)
+   - Tracks file states and changes
+   - Binary format for fast loading/saving
+   - Change detection using stat + hash
+
+3. **Snapshot System** (`src/commands/snapshot.c`)
+   - Creates atomic snapshots of directory state
+   - Captures git context and metadata
+   - Parent-child relationships for history
+
+4. **Daemon System** (`src/daemon/daemon_standalone.c`)
+   - Background process for automatic snapshots
+   - Configurable intervals and change detection
+   - File locking for concurrency safety
+
+5. **Git Integration** (`src/utils/git.c`)
+   - Branch detection and context capture
+   - Automatic branch-specific storage organization
+   - Git status and commit information
+
+### Data Structures
+
+```c
+// File index entry
+typedef struct {
+    char *path;                 // Relative path
+    unsigned char hash[32];     // SHA-256 hash  
+    mode_t mode;                // File permissions
+    off_t size;                 // File size
+    time_t mtime;               // Modification time
+} index_entry_t;
+
+// Snapshot metadata
+typedef struct {
+    char id[64];                // Unique snapshot ID
+    char *parent;               // Parent snapshot (nullable)
+    char *description;          // User description
+    time_t timestamp;           // Creation timestamp
+    unsigned char index_hash[32]; // Index state hash
+    char *git_branch;           // Git branch name
+    char *git_commit;           // Git commit hash
+    int git_dirty;              // Uncommitted changes flag
+} snapshot_t;
 ```
-fractyl/
-├── Makefile                    # Build system
-├── src/                        # Source code
-│   ├── main.c                  # Entry point and command dispatch
-│   ├── commands/               # Command implementations
-│   │   ├── snapshot.c
-│   │   ├── restore.c
-│   │   ├── delete.c
-│   │   └── list.c
-│   ├── core/                   # Core functionality modules
-│   │   ├── index.c             # Index management
-│   │   ├── objects.c           # Object storage operations
-│   │   ├── hash.c              # SHA hashing utilities
-│   │   └── *.h                 # Module headers
-│   ├── utils/                  # Utility modules
-│   │   ├── fs.c                # File system operations
-│   │   ├── cli.c               # Command line parsing
-│   │   ├── json.c              # JSON serialization
-│   │   └── *.h                 # Utility headers
-│   └── include/                # Public headers
-│       ├── fractyl.h           # Common definitions
-│       ├── core.h              # Core data structures
-│       ├── commands.h          # Command declarations
-│       └── utils.h             # Utility declarations
-├── o/                          # Object files (generated)
-├── tests/                      # Test suite
-└── README.md                   # This file
-```
-
-### Code Quality Standards
-
-- **C99 compliance**: Uses GNU99 standard for portability
-- **Memory safety**: Explicit allocation/deallocation with cleanup functions
-- **Error handling**: Consistent error codes and cleanup on failure paths
-- **Compiler warnings**: Builds with `-Wall -Wextra -Werror`
-- **Testing**: Unit tests for all core modules
-
-### Contributing
-
-1. Ensure your changes build cleanly: `make clean && make`
-2. Run tests: `make test`
-3. Follow existing code style and conventions
-4. Add tests for new functionality
-5. Update documentation as needed
-
-## Security Considerations
-
-- **Path validation**: All file paths are validated to prevent directory traversal
-- **Permission respect**: File permissions are preserved and respected
-- **Hash integrity**: SHA-256 provides cryptographic integrity verification
-- **Symlink handling**: Symbolic links are handled carefully to prevent attacks
-
-## Limitations
-
-- **Local only**: No remote synchronization capabilities
-- **Single-threaded**: No concurrent operations (may be added in future)
-- **File size limits**: 1GB maximum file size
-- **No compression**: Objects stored uncompressed (may be added in future)
-
-## Future Enhancements
-
-- `fractyl diff <snapshot-a> <snapshot-b>`: Compare snapshots
-- `fractyl tag <snapshot-id> <name>`: Tag snapshots for easy reference
-- `fractyl export <snapshot-id> --to tar.gz`: Export snapshots
-- `fractyl watch`: Automatic periodic snapshots
-- Object compression and garbage collection
-- Multi-threaded operations for large repositories
-
-## License
-
-This project is implemented according to the GNU99 C specification for maximum portability and compatibility.
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Build fails with "OpenSSL not found"**
+**Daemon won't start**
 ```bash
-# Ubuntu/Debian
-sudo apt-get install libssl-dev
+# Check if already running
+frac daemon status
 
-# RHEL/CentOS/Fedora
-sudo yum install openssl-devel  # or dnf install
+# Check for stale PID files
+cat .fractyl/daemon.pid
+ps aux | grep $(cat .fractyl/daemon.pid)
+
+# Remove stale PID if process not running
+rm .fractyl/daemon.pid
+frac daemon start
 ```
 
-**Build fails with "cJSON not found"**
+**Lock conflicts**
 ```bash
-# Ubuntu/Debian
-sudo apt-get install libcjson-dev
+# Check for active lock
+ls -la .fractyl/fractyl.lock
 
-# The build will work without cJSON but some features may be limited
+# If stale (daemon not running), remove it
+rm .fractyl/fractyl.lock
 ```
 
-**"No changes to snapshot" error**
-- Fractyl only creates snapshots when files have actually changed
-- Use `fractyl list` to see existing snapshots
-- Check that files aren't ignored by `.gitignore` or `.fractylignore`
-
-**Permission denied errors**
-- Ensure you have write access to the working directory
-- The `.fractyl/` directory needs read/write permissions
-- Some files may have restrictive permissions that prevent snapshotting
-
-### Debug Output
-
-Use the `--debug` flag with any command to see detailed operation information:
-
+**No snapshots created**
 ```bash
-fractyl snapshot -m "Debug test" --debug
+# Check if files actually changed
+frac snapshot -m "Test" --debug
+
+# Verify not all files are ignored
+cat .gitignore .fractylignore
+
+# Check daemon logs
+tail .fractyl/daemon.log
 ```
 
-This shows:
-- Files being processed
+**Permission errors**
+```bash
+# Ensure write access to working directory
+ls -la .fractyl/
+
+# Fix permissions if needed
+chmod -R 755 .fractyl/
+```
+
+### Debug Information
+
+Use `--debug` flag for detailed output:
+
+```bash
+frac snapshot -m "Debug test" --debug
+frac daemon start --debug
+```
+
+Shows:
+- File processing details
 - Hash calculations
 - Object storage operations
-- Index updates
-- Error details
+- Lock acquisition/release
+- Git integration status
 
-### Getting Help
+## Security and Reliability
 
-- Run `fractyl --help` for command usage
-- Run `make help` for build system help
-- Check the implementation plan and progress logs for development details
-- Use `fractyl --test-utils` to verify basic functionality
+### Security Features
+
+- **Path validation**: Prevents directory traversal attacks
+- **Permission preservation**: Maintains original file permissions
+- **Hash integrity**: SHA-256 provides cryptographic verification
+- **Symlink safety**: Careful handling of symbolic links
+
+### Reliability Features
+
+- **Atomic operations**: Snapshots are created atomically
+- **Corruption detection**: Hash mismatches detected automatically
+- **Graceful degradation**: Works without git, cJSON, or UUID
+- **Process recovery**: Handles daemon crashes and restarts
+
+### File Size Limits
+
+- Files larger than 1GB are excluded from snapshots
+- Large files are noted in index but not stored
+- Prevents unbounded object storage growth
+
+## Performance Characteristics
+
+- **Change detection**: O(n) scan with stat() optimization
+- **Object storage**: O(1) lookup by hash
+- **Deduplication**: Automatic across all snapshots
+- **Memory usage**: Scales with number of files, not file sizes
+- **Disk usage**: Only stores unique content once
+
+## Contributing
+
+1. **Setup development environment**
+   ```bash
+   make check-deps
+   make clean && make debug
+   ```
+
+2. **Run tests before changes**
+   ```bash
+   make test
+   make coverage
+   ```
+
+3. **Code standards**
+   - Follow existing C style and conventions
+   - Add tests for new functionality
+   - Update documentation as needed
+   - Ensure clean builds with `-Werror`
+
+4. **Snapshot your changes**
+   ```bash
+   frac daemon start  # Use Fractyl for development!
+   # ... make changes ...
+   frac snapshot -m "Implement feature X"
+   ```
+
+## License
+
+GNU General Public License - see source code for details.
+
+---
+
+**💡 Pro Tip**: Start the daemon (`frac daemon start`) at the beginning of any development session for automatic backup snapshots every 3 minutes. Use `./frac` for quick manual checkpoints. This gives you fearless development with complete version history!
