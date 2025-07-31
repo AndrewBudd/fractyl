@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
+#include <inttypes.h>
 #include "../include/core.h"
 #include "../include/fractyl.h"
 #include "../core/index.h"
@@ -104,7 +105,7 @@ static void process_file(thread_pool_t *pool, const char *full_path, const char 
     // Skip large files
     if (st->st_size > 1024 * 1024 * 1024) {
         pthread_mutex_lock(&pool->stats_mutex);
-        printf("Skipping large file: %s (%ld bytes)\n", rel_path, st->st_size);
+        printf("Skipping large file: %s (%" PRIdMAX " bytes)\n", rel_path, (intmax_t)st->st_size);
         pthread_mutex_unlock(&pool->stats_mutex);
         return;
     }
@@ -570,7 +571,7 @@ int scan_directory_cached(const char *root_path, index_t *new_index,
                 
                 // Skip large files
                 if (st.st_size > 1024 * 1024 * 1024) {
-                    printf("Skipping large file: %s (%ld bytes)\n", rel_path, st.st_size);
+                    printf("Skipping large file: %s (%" PRIdMAX " bytes)\n", rel_path, (intmax_t)st.st_size);
                     continue;
                 }
                 
