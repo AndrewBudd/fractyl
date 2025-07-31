@@ -44,7 +44,6 @@ TAGS
 # Debug files
 *.dSYM/
 *.pdb
-core
 vgcore.*
 
 # Test artifacts
