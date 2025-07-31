@@ -9,6 +9,7 @@
 #include "../utils/paths.h"
 #include "../utils/gitignore.h"
 #include "../utils/lock.h"
+#include "../utils/parallel_scan.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,124 +24,6 @@
 #include <fcntl.h>
 #endif
 
-static int scan_directory_recursive(const char *dir_path, const char *relative_path, 
-                                   index_t *new_index, const index_t *prev_index, const char *fractyl_dir,
-                                   const char *repo_root) {
-    DIR *d = opendir(dir_path);
-    if (!d) return FRACTYL_ERROR_IO;
-
-    struct dirent *entry;
-    while ((entry = readdir(d)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-        
-        // Skip .fractyl directory
-        if (strcmp(entry->d_name, ".fractyl") == 0) {
-            continue;
-        }
-
-        char full_path[2048];
-        char rel_path[2048];
-        
-        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
-        if (strlen(relative_path) == 0) {
-            strcpy(rel_path, entry->d_name);
-        } else {
-            snprintf(rel_path, sizeof(rel_path), "%s/%s", relative_path, entry->d_name);
-        }
-
-        struct stat st;
-        if (stat(full_path, &st) != 0) {
-            continue;
-        }
-        
-        // Check if this path should be ignored according to .gitignore or .fractylignore
-        if (should_ignore_path(repo_root, full_path, rel_path)) {
-            continue;  // Skip ignored files/directories
-        }
-
-        if (S_ISDIR(st.st_mode)) {
-            // Recursively scan directory
-            int result = scan_directory_recursive(full_path, rel_path, new_index, prev_index, fractyl_dir, repo_root);
-            if (result != FRACTYL_OK) {
-                closedir(d);
-                return result;
-            }
-        } else if (S_ISREG(st.st_mode)) {
-            // Skip files larger than 1GB
-            if (st.st_size > 1024 * 1024 * 1024) {
-                printf("Skipping large file: %s (%ld bytes)\n", rel_path, st.st_size);
-                continue;
-            }
-
-            // Create index entry
-            index_entry_t entry_data;
-            memset(&entry_data, 0, sizeof(entry_data));
-            
-            entry_data.path = strdup(rel_path);
-            if (!entry_data.path) {
-                closedir(d);
-                return FRACTYL_ERROR_OUT_OF_MEMORY;
-            }
-            
-            entry_data.mode = st.st_mode;
-            entry_data.size = st.st_size;
-            entry_data.mtime = st.st_mtime;
-            
-            // Check if file has changed compared to previous snapshot
-            const index_entry_t *prev_entry = prev_index ? index_find_entry(prev_index, rel_path) : NULL;
-            int file_changed = 1; // Assume changed if no previous entry
-            
-            if (prev_entry) {
-                // Quick check: size or mtime changed?
-                if (prev_entry->size == st.st_size && prev_entry->mtime == st.st_mtime) {
-                    // Size and mtime same, file likely unchanged
-                    // Copy the previous hash to avoid re-hashing
-                    memcpy(entry_data.hash, prev_entry->hash, 32);
-                    file_changed = 0;
-                } else {
-                    // Size or mtime changed, need to hash and compare
-                    int result = object_store_file(full_path, fractyl_dir, entry_data.hash);
-                    if (result != FRACTYL_OK) {
-                        printf("Warning: Failed to store file %s: %d\n", rel_path, result);
-                        free(entry_data.path);
-                        continue;
-                    }
-                    
-                    // Compare hashes
-                    if (memcmp(entry_data.hash, prev_entry->hash, 32) == 0) {
-                        file_changed = 0;
-                    }
-                }
-            } else {
-                // New file, hash and store it
-                int result = object_store_file(full_path, fractyl_dir, entry_data.hash);
-                if (result != FRACTYL_OK) {
-                    printf("Warning: Failed to store file %s: %d\n", rel_path, result);
-                    free(entry_data.path);
-                    continue;
-                }
-            }
-            
-            if (file_changed) {
-                printf("  %s %s\n", prev_entry ? "M" : "A", rel_path);
-            }
-            
-            // Always add to index (even unchanged files need to be tracked)
-            int result = index_add_entry(new_index, &entry_data);
-            free(entry_data.path);
-            
-            if (result != FRACTYL_OK) {
-                closedir(d);
-                return result;
-            }
-        }
-    }
-
-    closedir(d);
-    return FRACTYL_OK;
-}
 
 // Find the most recent snapshot to use as parent
 static char* find_latest_snapshot(const char *fractyl_dir, const char *branch) {
@@ -497,7 +380,8 @@ int cmd_snapshot(int argc, char **argv) {
     
     printf("Scanning directory...\n");
     
-    int result = scan_directory_recursive(repo_root, "", &new_index, prev_index_ptr, fractyl_dir, repo_root);
+    // Use cached scanning for better performance with large repositories
+    int result = scan_directory_cached(repo_root, &new_index, prev_index_ptr, fractyl_dir, git_branch);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to scan directory: %d\n", result);
         if (auto_message) free(auto_message);

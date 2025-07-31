@@ -71,6 +71,9 @@ ifeq ($(HAS_UUID),yes)
     INCLUDES += $(shell pkg-config --cflags uuid)
 endif
 
+# Add pthread for parallel scanning
+LIBS += -lpthread
+
 # libuv dependency removed - daemon now uses simple timer approach
 
 # Default target
