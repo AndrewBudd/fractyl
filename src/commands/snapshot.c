@@ -8,6 +8,8 @@
 #include "../utils/git.h"
 #include "../utils/paths.h"
 #include "../utils/gitignore.h"
+#include "../utils/directory_cache.h"
+#include "../utils/tree.h"
 #include "../utils/lock.h"
 #include "../utils/parallel_scan.h"
 #include <stdio.h>
@@ -393,6 +395,16 @@ int cmd_snapshot(int argc, char **argv) {
     }
     
     printf("Found %zu files\n", new_index.count);
+
+    // Build tree objects and update directory cache
+    unsigned char root_tree_hash[32];
+    directory_cache_t tmp_cache;
+    if (dir_cache_load(&tmp_cache, fractyl_dir, git_branch) == FRACTYL_OK) {
+        if (build_trees_from_index(&new_index, fractyl_dir, &tmp_cache, root_tree_hash) == FRACTYL_OK) {
+            dir_cache_save(&tmp_cache, fractyl_dir);
+        }
+        dir_cache_free(&tmp_cache);
+    }
     
     // Check if there are any actual changes
     // Count files that are actually different

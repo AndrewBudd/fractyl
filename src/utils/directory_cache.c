@@ -3,6 +3,7 @@
 #include "paths.h"
 #include "fs.h"
 #include "../include/fractyl.h"
+#include "../core/hash.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -142,14 +143,18 @@ int dir_cache_load(directory_cache_t *cache, const char *fractyl_dir, const char
             
             cJSON *mtime_json = cJSON_GetObjectItem(dir_entry, "mtime");
             cJSON *file_count_json = cJSON_GetObjectItem(dir_entry, "file_count");
+            cJSON *hash_json = cJSON_GetObjectItem(dir_entry, "hash");
             
             if (mtime_json && cJSON_IsNumber(mtime_json) &&
-                file_count_json && cJSON_IsNumber(file_count_json)) {
+                file_count_json && cJSON_IsNumber(file_count_json) &&
+                hash_json && cJSON_IsString(hash_json)) {
                 
                 time_t mtime = (time_t)mtime_json->valueint;
                 int file_count = file_count_json->valueint;
                 
-                dir_cache_update_entry(cache, path, mtime, file_count);
+                unsigned char hash[32] = {0};
+                string_to_hash(hash_json->valuestring, hash);
+                dir_cache_update_entry(cache, path, mtime, file_count, hash);
             }
         }
     }
@@ -191,7 +196,10 @@ int dir_cache_save(const directory_cache_t *cache, const char *fractyl_dir) {
         cJSON *dir_obj = cJSON_CreateObject();
         cJSON_AddNumberToObject(dir_obj, "mtime", (double)entry->mtime);
         cJSON_AddNumberToObject(dir_obj, "file_count", entry->file_count);
-        
+        char hash_hex[65];
+        hash_to_string(entry->hash, hash_hex);
+        cJSON_AddStringToObject(dir_obj, "hash", hash_hex);
+
         cJSON_AddItemToObject(directories, entry->path, dir_obj);
     }
     
@@ -223,7 +231,7 @@ int dir_cache_save(const directory_cache_t *cache, const char *fractyl_dir) {
 }
 
 // Add or update directory entry in cache
-int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mtime, int file_count) {
+int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mtime, int file_count, const unsigned char *hash) {
     if (!cache || !path) return FRACTYL_ERROR_INVALID_ARGS;
     
     // Look for existing entry
@@ -232,6 +240,7 @@ int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mt
             // Update existing entry
             cache->entries[i].mtime = mtime;
             cache->entries[i].file_count = file_count;
+            if (hash) memcpy(cache->entries[i].hash, hash, 32);
             return FRACTYL_OK;
         }
     }
@@ -260,6 +269,7 @@ int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mt
     }
     entry->mtime = mtime;
     entry->file_count = file_count;
+    if (hash) memcpy(entry->hash, hash, 32);
     cache->count++;
     
     return FRACTYL_OK;

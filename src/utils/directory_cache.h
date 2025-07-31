@@ -7,8 +7,9 @@
 // Directory cache entry - tracks mtime and file count for a directory
 typedef struct {
     char *path;              // Relative path from repo root
-    time_t mtime;           // Directory modification time
-    int file_count;         // Number of files in directory (for validation)
+    time_t mtime;            // Directory modification time
+    int file_count;          // Number of files in directory (for validation)
+    unsigned char hash[32];  // Tree object hash for directory
 } dir_cache_entry_t;
 
 // Directory cache - holds all cached directory information
@@ -43,7 +44,7 @@ int dir_cache_load(directory_cache_t *cache, const char *fractyl_dir, const char
 int dir_cache_save(const directory_cache_t *cache, const char *fractyl_dir);
 
 // Add or update directory entry in cache
-int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mtime, int file_count);
+int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mtime, int file_count, const unsigned char *hash);
 
 // Find directory entry in cache
 const dir_cache_entry_t *dir_cache_find_entry(const directory_cache_t *cache, const char *path);
