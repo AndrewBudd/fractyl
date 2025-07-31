@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <time.h>
+#include <errno.h>
 
 // Get chronologically ordered snapshots (newest first)
 static char** get_chronological_snapshots_for_branch(const char *fractyl_dir, const char *branch, size_t *count) {
@@ -369,24 +370,77 @@ int cmd_restore(int argc, char **argv) {
         return 1;
     }
     
+    // Load the current index so we can remove files that do not exist
+    // in the snapshot being restored
+    index_t current_index;
+    index_init(&current_index);
+
+    char current_index_path[PATH_MAX];
+    snprintf(current_index_path, sizeof(current_index_path), "%s/index", fractyl_dir);
+    index_load(&current_index, current_index_path); // ignore errors, empty if none
+
     // Restore each file from object storage
     for (size_t i = 0; i < index.count; i++) {
         const index_entry_t *entry = &index.entries[i];
         if (!entry->path) continue;
-        
+
+        char dest_path[PATH_MAX];
+        snprintf(dest_path, sizeof(dest_path), "%s/%s", repo_root, entry->path);
+
+        // Ensure parent directory exists
+        char *parent_dir = strdup(dest_path);
+        char *slash = strrchr(parent_dir, '/');
+        if (slash) {
+            *slash = '\0';
+            paths_ensure_directory(parent_dir);
+        }
+        free(parent_dir);
+
         printf("Restoring %s...\n", entry->path);
-        
-        result = object_restore_file(entry->hash, fractyl_dir, entry->path);
+
+        result = object_restore_file(entry->hash, fractyl_dir, dest_path);
         if (result != FRACTYL_OK) {
             printf("Warning: Failed to restore %s: %d\n", entry->path, result);
             continue;
         }
-        
+
         // Set file permissions
-        if (chmod(entry->path, entry->mode) != 0) {
-            printf("Warning: Failed to set permissions for %s\n", entry->path);
+        if (chmod(dest_path, entry->mode) != 0) {
+            printf("Warning: Failed to set permissions for %s\n", dest_path);
         }
     }
+
+    // Remove files that existed in the current index but not in the
+    // restored snapshot
+    for (size_t i = 0; i < current_index.count; i++) {
+        const index_entry_t *cur = &current_index.entries[i];
+        if (!cur->path) continue;
+        if (index_find_entry(&index, cur->path)) {
+            continue; // still exists
+        }
+
+        char remove_path[PATH_MAX];
+        snprintf(remove_path, sizeof(remove_path), "%s/%s", repo_root, cur->path);
+
+        printf("Removing %s...\n", cur->path);
+        if (unlink(remove_path) != 0 && errno != ENOENT) {
+            printf("Warning: Failed to remove %s\n", remove_path);
+        }
+
+        // Attempt to remove empty parent directories up to repo root
+        char temp[PATH_MAX];
+        strncpy(temp, remove_path, sizeof(temp));
+        char *p = strrchr(temp, '/');
+        while (p && (size_t)(p - temp) > strlen(repo_root)) {
+            *p = '\0';
+            if (rmdir(temp) != 0) {
+                break; // stop if directory not empty or error
+            }
+            p = strrchr(temp, '/');
+        }
+    }
+
+    index_free(&current_index);
     
     printf("Restored %zu files from snapshot %s\n", index.count, snapshot_id);
     

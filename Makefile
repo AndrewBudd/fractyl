@@ -2,7 +2,7 @@
 # Proper build system with object files and dependency management
 
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -std=gnu99 -g -Wno-format-truncation
+CFLAGS = -Wall -Wextra -Werror -std=gnu99 -g -Wno-format-truncation -Wno-deprecated-declarations
 COVERAGE_CFLAGS = $(CFLAGS) --coverage
 INCLUDES = -Isrc/include -Isrc/utils -Isrc/core -Isrc/vendor/xdiff
 LDFLAGS = 

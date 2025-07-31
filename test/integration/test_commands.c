@@ -1,8 +1,7 @@
+#define _XOPEN_SOURCE 500
 #include "../unity/unity.h"
-#include "../../src/commands/init.h"
-#include "../../src/commands/snapshot.h"
-#include "../../src/commands/list.h"
-#include "../../src/commands/restore.h"
+#include "../../src/include/commands.h"
+#include "../../src/utils/fs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -172,6 +171,49 @@ void test_cmd_list_with_snapshots(void) {
     TEST_ASSERT_EQUAL(0, result);
 }
 
+void test_cmd_restore_removes_extra_files(void) {
+    const char *test_repo = "/tmp/fractyl_test_repo";
+
+    mkdir(test_repo, 0755);
+    chdir(test_repo);
+
+    char *init_argv[] = {"frac", "init"};
+    TEST_ASSERT_EQUAL(0, cmd_init(2, init_argv));
+
+    /* Create initial file and snapshot */
+    FILE *fp = fopen("file1.txt", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "one");
+    fclose(fp);
+
+    char *snap1[] = {"frac", "snapshot", "-m", "first"};
+    TEST_ASSERT_EQUAL(0, cmd_snapshot(4, snap1));
+
+    char first_id[65];
+    FILE *cur = fopen(".fractyl/CURRENT", "r");
+    TEST_ASSERT_NOT_NULL(cur);
+    fgets(first_id, sizeof(first_id), cur);
+    fclose(cur);
+    first_id[strcspn(first_id, "\n")] = '\0';
+
+    /* Add extra file and take another snapshot */
+    fp = fopen("file2.txt", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "two");
+    fclose(fp);
+
+    char *snap2[] = {"frac", "snapshot", "-m", "second"};
+    TEST_ASSERT_EQUAL(0, cmd_snapshot(4, snap2));
+
+    /* Restore back to first snapshot */
+    char *restore_argv[] = {"frac", "restore", first_id};
+    TEST_ASSERT_EQUAL(0, cmd_restore(3, restore_argv));
+
+    /* file2.txt should have been removed */
+    TEST_ASSERT_EQUAL(0, file_exists("file2.txt"));
+    TEST_ASSERT_EQUAL(1, file_exists("file1.txt"));
+}
+
 /* Test error conditions */
 void test_cmd_snapshot_outside_repository(void) {
     /* Try to create snapshot outside of fractyl repository */
@@ -206,10 +248,11 @@ int main(void) {
     /* Snapshot command tests */
     RUN_TEST(test_cmd_snapshot_with_files);
     RUN_TEST(test_cmd_snapshot_empty_repository);
-    
+
     /* List command tests */
     RUN_TEST(test_cmd_list_empty_repository);
     RUN_TEST(test_cmd_list_with_snapshots);
+    RUN_TEST(test_cmd_restore_removes_extra_files);
     
     /* Error condition tests */
     RUN_TEST(test_cmd_snapshot_outside_repository);
