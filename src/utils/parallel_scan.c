@@ -620,7 +620,9 @@ int scan_directory_cached(const char *root_path, index_t *new_index,
         closedir(d);
         
         // Update directory cache with new mtime and file count
-        dir_cache_update_entry(&dir_cache, current->rel_path, dir_stat.st_mtime, file_count);
+        // Tree hash will be filled in later during tree building
+        dir_cache_update_entry(&dir_cache, current->rel_path,
+                               dir_stat.st_mtime, file_count, NULL);
         
         free(current->path);
         free(current->rel_path);

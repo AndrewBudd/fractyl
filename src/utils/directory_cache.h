@@ -5,17 +5,20 @@
 #include <stddef.h>
 
 // Directory cache entry - tracks mtime and file count for a directory
+#define DIR_CACHE_TOMBSTONE ((char*)-1)
+
 typedef struct {
-    char *path;              // Relative path from repo root
-    time_t mtime;           // Directory modification time
-    int file_count;         // Number of files in directory (for validation)
+    char *path;              // Relative path from repo root (NULL = empty, DIR_CACHE_TOMBSTONE = deleted)
+    time_t mtime;            // Directory modification time
+    int file_count;          // Number of files in directory (for validation)
+    unsigned char hash[32];  // Tree object hash for directory
 } dir_cache_entry_t;
 
 // Directory cache - holds all cached directory information
 typedef struct {
-    dir_cache_entry_t *entries;
-    size_t count;
-    size_t capacity;
+    dir_cache_entry_t *entries; // open-addressing hash table
+    size_t count;               // number of active entries
+    size_t capacity;            // table size (power of two)
     time_t cache_timestamp;  // When cache was last updated
     char *branch;           // Git branch this cache belongs to
 } directory_cache_t;
@@ -43,7 +46,7 @@ int dir_cache_load(directory_cache_t *cache, const char *fractyl_dir, const char
 int dir_cache_save(const directory_cache_t *cache, const char *fractyl_dir);
 
 // Add or update directory entry in cache
-int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mtime, int file_count);
+int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mtime, int file_count, const unsigned char *hash);
 
 // Find directory entry in cache
 const dir_cache_entry_t *dir_cache_find_entry(const directory_cache_t *cache, const char *path);

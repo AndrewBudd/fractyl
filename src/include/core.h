@@ -25,6 +25,7 @@ typedef struct {
     char *description;
     time_t timestamp;
     unsigned char index_hash[32];
+    unsigned char tree_hash[32];
     char **git_status;
     size_t git_status_count;
     // Git-related fields
