@@ -3,6 +3,7 @@
 #include "paths.h"
 #include "fs.h"
 #include "../include/fractyl.h"
+#include "../core/hash.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,34 @@
 #ifdef HAVE_CJSON
 #include <cjson/cJSON.h>
 #endif
+
+static size_t hash_path(const char *path) {
+    size_t h = 14695981039346656037ULL;
+    for (const unsigned char *p = (const unsigned char*)path; *p; p++) {
+        h ^= *p;
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static int dir_cache_rehash(directory_cache_t *cache, size_t new_cap) {
+    dir_cache_entry_t *new_entries = calloc(new_cap, sizeof(dir_cache_entry_t));
+    if (!new_entries) return FRACTYL_ERROR_OUT_OF_MEMORY;
+
+    for (size_t i = 0; i < cache->capacity; i++) {
+        dir_cache_entry_t *e = &cache->entries[i];
+        if (e->path && e->path != DIR_CACHE_TOMBSTONE) {
+            size_t idx = hash_path(e->path) & (new_cap - 1);
+            while (new_entries[idx].path) idx = (idx + 1) & (new_cap - 1);
+            new_entries[idx] = *e;
+        }
+    }
+
+    free(cache->entries);
+    cache->entries = new_entries;
+    cache->capacity = new_cap;
+    return FRACTYL_OK;
+}
 
 // Initialize empty directory cache
 int dir_cache_init(directory_cache_t *cache, const char *branch) {
@@ -38,8 +67,9 @@ int dir_cache_init(directory_cache_t *cache, const char *branch) {
 void dir_cache_free(directory_cache_t *cache) {
     if (!cache) return;
     
-    for (size_t i = 0; i < cache->count; i++) {
-        free(cache->entries[i].path);
+    for (size_t i = 0; i < cache->capacity; i++) {
+        if (cache->entries[i].path && cache->entries[i].path != DIR_CACHE_TOMBSTONE)
+            free(cache->entries[i].path);
     }
     free(cache->entries);
     free(cache->branch);
@@ -142,14 +172,18 @@ int dir_cache_load(directory_cache_t *cache, const char *fractyl_dir, const char
             
             cJSON *mtime_json = cJSON_GetObjectItem(dir_entry, "mtime");
             cJSON *file_count_json = cJSON_GetObjectItem(dir_entry, "file_count");
+            cJSON *hash_json = cJSON_GetObjectItem(dir_entry, "hash");
             
             if (mtime_json && cJSON_IsNumber(mtime_json) &&
-                file_count_json && cJSON_IsNumber(file_count_json)) {
+                file_count_json && cJSON_IsNumber(file_count_json) &&
+                hash_json && cJSON_IsString(hash_json)) {
                 
                 time_t mtime = (time_t)mtime_json->valueint;
                 int file_count = file_count_json->valueint;
                 
-                dir_cache_update_entry(cache, path, mtime, file_count);
+                unsigned char hash[32] = {0};
+                string_to_hash(hash_json->valuestring, hash);
+                dir_cache_update_entry(cache, path, mtime, file_count, hash);
             }
         }
     }
@@ -185,13 +219,17 @@ int dir_cache_save(const directory_cache_t *cache, const char *fractyl_dir) {
     cJSON_AddItemToObject(root, "directories", directories);
     
     // Add all directory entries
-    for (size_t i = 0; i < cache->count; i++) {
+    for (size_t i = 0; i < cache->capacity; i++) {
         const dir_cache_entry_t *entry = &cache->entries[i];
+        if (!entry->path || entry->path == DIR_CACHE_TOMBSTONE) continue;
         
         cJSON *dir_obj = cJSON_CreateObject();
         cJSON_AddNumberToObject(dir_obj, "mtime", (double)entry->mtime);
         cJSON_AddNumberToObject(dir_obj, "file_count", entry->file_count);
-        
+        char hash_hex[65];
+        hash_to_string(entry->hash, hash_hex);
+        cJSON_AddStringToObject(dir_obj, "hash", hash_hex);
+
         cJSON_AddItemToObject(directories, entry->path, dir_obj);
     }
     
@@ -223,59 +261,56 @@ int dir_cache_save(const directory_cache_t *cache, const char *fractyl_dir) {
 }
 
 // Add or update directory entry in cache
-int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mtime, int file_count) {
+int dir_cache_update_entry(directory_cache_t *cache, const char *path, time_t mtime, int file_count, const unsigned char *hash) {
     if (!cache || !path) return FRACTYL_ERROR_INVALID_ARGS;
-    
-    // Look for existing entry
-    for (size_t i = 0; i < cache->count; i++) {
-        if (strcmp(cache->entries[i].path, path) == 0) {
-            // Update existing entry
-            cache->entries[i].mtime = mtime;
-            cache->entries[i].file_count = file_count;
+
+    if (cache->count * 2 >= cache->capacity) {
+        if (dir_cache_rehash(cache, cache->capacity * 2) != FRACTYL_OK)
+            return FRACTYL_ERROR_OUT_OF_MEMORY;
+    }
+
+    size_t idx = hash_path(path) & (cache->capacity - 1);
+    size_t tomb = (size_t)-1;
+    while (1) {
+        dir_cache_entry_t *e = &cache->entries[idx];
+        if (!e->path) {
+            if (tomb != (size_t)-1) idx = tomb;
+            break;
+        }
+        if (e->path == DIR_CACHE_TOMBSTONE) {
+            if (tomb == (size_t)-1) tomb = idx;
+        } else if (strcmp(e->path, path) == 0) {
+            e->mtime = mtime;
+            e->file_count = file_count;
+            if (hash) memcpy(e->hash, hash, 32);
             return FRACTYL_OK;
         }
+        idx = (idx + 1) & (cache->capacity - 1);
     }
-    
-    // Add new entry - check if we need to resize
-    if (cache->count >= cache->capacity) {
-        size_t new_capacity = cache->capacity * 2;
-        dir_cache_entry_t *new_entries = realloc(cache->entries, 
-                                                 new_capacity * sizeof(dir_cache_entry_t));
-        if (!new_entries) {
-            return FRACTYL_ERROR_OUT_OF_MEMORY;
-        }
-        cache->entries = new_entries;
-        cache->capacity = new_capacity;
-        
-        // Zero out new memory
-        memset(&cache->entries[cache->count], 0, 
-               (new_capacity - cache->count) * sizeof(dir_cache_entry_t));
-    }
-    
-    // Add new entry
-    dir_cache_entry_t *entry = &cache->entries[cache->count];
+
+    dir_cache_entry_t *entry = &cache->entries[idx];
+    if (entry->path && entry->path != DIR_CACHE_TOMBSTONE) free(entry->path);
     entry->path = strdup(path);
-    if (!entry->path) {
-        return FRACTYL_ERROR_OUT_OF_MEMORY;
-    }
+    if (!entry->path) return FRACTYL_ERROR_OUT_OF_MEMORY;
     entry->mtime = mtime;
     entry->file_count = file_count;
+    if (hash) memcpy(entry->hash, hash, 32); else memset(entry->hash,0,32);
     cache->count++;
-    
     return FRACTYL_OK;
 }
 
 // Find directory entry in cache
 const dir_cache_entry_t *dir_cache_find_entry(const directory_cache_t *cache, const char *path) {
     if (!cache || !path) return NULL;
-    
-    for (size_t i = 0; i < cache->count; i++) {
-        if (strcmp(cache->entries[i].path, path) == 0) {
-            return &cache->entries[i];
-        }
+
+    size_t idx = hash_path(path) & (cache->capacity - 1);
+    while (1) {
+        dir_cache_entry_t *e = &cache->entries[idx];
+        if (!e->path) return NULL;
+        if (e->path != DIR_CACHE_TOMBSTONE && strcmp(e->path, path) == 0)
+            return e;
+        idx = (idx + 1) & (cache->capacity - 1);
     }
-    
-    return NULL;
 }
 
 // Check if directory needs scanning based on cache
@@ -305,33 +340,30 @@ dir_scan_result_t dir_cache_check_directory(const directory_cache_t *cache,
 // Remove directory entry from cache
 int dir_cache_remove_entry(directory_cache_t *cache, const char *path) {
     if (!cache || !path) return FRACTYL_ERROR_INVALID_ARGS;
-    
-    for (size_t i = 0; i < cache->count; i++) {
-        if (strcmp(cache->entries[i].path, path) == 0) {
-            // Free the path string
-            free(cache->entries[i].path);
-            
-            // Move remaining entries down
-            for (size_t j = i; j < cache->count - 1; j++) {
-                cache->entries[j] = cache->entries[j + 1];
-            }
+
+    size_t idx = hash_path(path) & (cache->capacity - 1);
+    while (1) {
+        dir_cache_entry_t *e = &cache->entries[idx];
+        if (!e->path) return FRACTYL_ERROR_NOT_FOUND;
+        if (e->path != DIR_CACHE_TOMBSTONE && strcmp(e->path, path) == 0) {
+            free(e->path);
+            e->path = DIR_CACHE_TOMBSTONE;
             cache->count--;
-            
-            // Clear the last entry
-            memset(&cache->entries[cache->count], 0, sizeof(dir_cache_entry_t));
             return FRACTYL_OK;
         }
+        idx = (idx + 1) & (cache->capacity - 1);
     }
-    
-    return FRACTYL_ERROR_NOT_FOUND;
 }
 
 // Clear entire cache
 void dir_cache_clear(directory_cache_t *cache) {
     if (!cache) return;
-    
-    for (size_t i = 0; i < cache->count; i++) {
-        free(cache->entries[i].path);
+
+    for (size_t i = 0; i < cache->capacity; i++) {
+        if (cache->entries[i].path && cache->entries[i].path != DIR_CACHE_TOMBSTONE) {
+            free(cache->entries[i].path);
+        }
+        cache->entries[i].path = NULL;
     }
     cache->count = 0;
     cache->cache_timestamp = time(NULL);
@@ -352,16 +384,15 @@ int dir_cache_validate(const directory_cache_t *cache) {
     if (!cache->branch) return FRACTYL_ERROR_INVALID_STATE;
     if (cache->count > cache->capacity) return FRACTYL_ERROR_INVALID_STATE;
     
-    // Check for duplicate paths
-    for (size_t i = 0; i < cache->count; i++) {
-        if (!cache->entries[i].path) return FRACTYL_ERROR_INVALID_STATE;
-        
-        for (size_t j = i + 1; j < cache->count; j++) {
-            if (strcmp(cache->entries[i].path, cache->entries[j].path) == 0) {
-                return FRACTYL_ERROR_INVALID_STATE;
-            }
+    // Basic validation of entries
+    size_t seen = 0;
+    for (size_t i = 0; i < cache->capacity; i++) {
+        dir_cache_entry_t *e = &cache->entries[i];
+        if (e->path && e->path != DIR_CACHE_TOMBSTONE) {
+            seen++;
         }
     }
+    if (seen != cache->count) return FRACTYL_ERROR_INVALID_STATE;
     
     return FRACTYL_OK;
 }

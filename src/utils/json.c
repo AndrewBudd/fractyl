@@ -45,6 +45,11 @@ char* json_serialize_snapshot(const snapshot_t *snapshot) {
     hash_to_string(snapshot->index_hash, hash_hex);
     cJSON_AddStringToObject(json, "index_hash", hash_hex);
 
+    // Add tree hash as hex string
+    char tree_hex[FRACTYL_HASH_HEX_SIZE];
+    hash_to_string(snapshot->tree_hash, tree_hex);
+    cJSON_AddStringToObject(json, "tree_hash", tree_hex);
+
     // Add git status array
     if (snapshot->git_status && snapshot->git_status_count > 0) {
         cJSON *git_status_array = cJSON_CreateArray();
@@ -121,6 +126,12 @@ int json_deserialize_snapshot(const char *json_str, snapshot_t *snapshot) {
     cJSON *index_hash = cJSON_GetObjectItem(json, "index_hash");
     if (cJSON_IsString(index_hash) && index_hash->valuestring) {
         string_to_hash(index_hash->valuestring, snapshot->index_hash);
+    }
+
+    // Parse tree hash
+    cJSON *tree_hash = cJSON_GetObjectItem(json, "tree_hash");
+    if (cJSON_IsString(tree_hash) && tree_hash->valuestring) {
+        string_to_hash(tree_hash->valuestring, snapshot->tree_hash);
     }
 
     // Parse git status array
