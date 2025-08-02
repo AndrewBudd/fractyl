@@ -169,7 +169,7 @@ unit-tests: $(TEST_OBJDIR) $(UNIT_TEST_BINS)
 	done
 
 # Build integration tests
-integration-tests: $(TEST_OBJDIR) $(INTEGRATION_TEST_BINS)
+integration-tests: $(TARGET) $(TEST_OBJDIR) $(INTEGRATION_TEST_BINS)
 	@echo "Running integration tests..."
 	@for test in $(INTEGRATION_TEST_BINS); do \
 		echo "Running $$test..."; \
@@ -181,8 +181,8 @@ $(TEST_OBJDIR)/test_%: $(TESTDIR)/unit/test_%.c $(UNITY_SRC) $(ALL_OBJ) | $(TEST
 	$(CC) $(CFLAGS) $(INCLUDES) $(UNITY_INC) -o $@ $< $(UNITY_SRC) $(filter-out o/main.o, $(ALL_OBJ)) $(LIBS)
 
 # Build individual integration test binaries  
-$(TEST_OBJDIR)/test_%: $(TESTDIR)/integration/test_%.c $(UNITY_SRC) $(ALL_OBJ) | $(TEST_OBJDIR)
-	$(CC) $(CFLAGS) $(INCLUDES) $(UNITY_INC) -o $@ $< $(UNITY_SRC) $(filter-out o/main.o, $(ALL_OBJ)) $(LIBS)
+$(TEST_OBJDIR)/test_%: $(TESTDIR)/integration/test_%.c $(UNITY_SRC) $(TESTDIR)/test_helpers.c $(ALL_OBJ) | $(TEST_OBJDIR)
+	$(CC) $(CFLAGS) $(INCLUDES) $(UNITY_INC) -I$(TESTDIR) -o $@ $< $(UNITY_SRC) $(TESTDIR)/test_helpers.c $(filter-out o/main.o, $(ALL_OBJ)) $(LIBS)
 
 # Clean test artifacts
 test-clean:

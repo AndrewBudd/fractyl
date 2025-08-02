@@ -352,6 +352,160 @@ gdb ./frac
 
 ---
 
+## 🧪 **Testing Requirements**
+
+**⚠️ CRITICAL: ALWAYS RUN TESTS AFTER ANY CODE CHANGES**
+
+### **Testing Workflow - MANDATORY:**
+1. **🔨 Build the project** - `make clean && make`
+2. **🧪 Run all tests** - Use test runner scripts
+3. **📸 Create snapshot** - Only after tests pass
+4. **🔄 Fix any failures** - Never commit broken tests
+
+### **Test Suite Structure:**
+```
+test/
+├── unity/                 # Unity testing framework
+├── test_helpers.h/.c      # Test utility functions
+├── unit/                  # Unit tests for individual components
+│   ├── test_core.c        # Core functionality (hashing, objects, index)
+│   └── test_utils.c       # Utility functions
+├── integration/           # Integration tests for complete workflows
+│   ├── test_fractyl_integration.c    # Main integration test suite
+│   ├── test_restore_behavior.c       # Restore functionality tests
+│   └── test_simple_validation.c     # Basic validation tests
+└── run_tests.sh          # Test runner script
+```
+
+### **Essential Test Commands:**
+
+```bash
+# Build all tests
+make tests
+
+# Run individual test suites
+./test_obj/test_core                    # Core functionality tests
+./test_obj/test_utils                   # Utility function tests  
+./test_obj/test_fractyl_integration     # Main integration tests
+./test_obj/test_restore_behavior        # Restore behavior tests
+./test_obj/test_simple_validation       # Basic validation tests
+
+# Run all tests with script
+./run_tests.sh
+
+# Run basic tests only
+./run_basic_tests.sh
+```
+
+### **Test Categories:**
+
+1. **🔧 Unit Tests** - Test individual functions and components
+   - Hash functions and consistency
+   - Object storage and retrieval
+   - Index operations
+   - File system utilities
+   - CLI argument parsing
+
+2. **🔄 Integration Tests** - Test complete workflows
+   - Repository initialization
+   - Snapshot creation and listing
+   - File modification tracking
+   - Snapshot restoration (including cleanup of extra files)
+   - Complex file operations with directories
+   - Edge cases (empty files, permissions)
+
+3. **🛡️ Behavior Tests** - Test specific behaviors
+   - Restore removes files not in snapshot
+   - Directory cleanup after restore
+   - Concurrent operation handling
+
+### **Test Development Guidelines:**
+
+- **🎯 Test-driven approach**: Write tests for new features before implementation
+- **📁 Use temporary directories**: All tests use `/tmp/fractyl_test_*` for isolation
+- **🧹 Clean isolation**: Each test gets fresh temporary repository
+- **🔍 Comprehensive coverage**: Test both success and failure cases
+- **📝 Clear assertions**: Use descriptive test names and clear failure messages
+
+### **Test Helper Functions:**
+
+```c
+// Repository management
+test_repo_t* test_repo_create(const char* name);
+int test_repo_enter(test_repo_t* repo);
+void test_repo_destroy(test_repo_t* repo);
+
+// File operations
+int test_file_create(const char* path, const char* content);
+int test_file_modify(const char* path, const char* content);
+int test_file_remove(const char* path);
+char* test_file_read(const char* path);
+
+// Fractyl operations
+int test_fractyl_init(test_repo_t* repo);
+int test_fractyl_snapshot(test_repo_t* repo, const char* message);
+int test_fractyl_restore(test_repo_t* repo, const char* snapshot_id);
+char* test_fractyl_list(test_repo_t* repo);
+char* test_fractyl_get_latest_snapshot_id(test_repo_t* repo);
+
+// Assertions
+TEST_ASSERT_FRACTYL_SUCCESS(result);
+TEST_ASSERT_FILE_EXISTS(path);
+TEST_ASSERT_FILE_NOT_EXISTS(path);
+TEST_ASSERT_FILE_CONTENT(path, expected_content);
+TEST_ASSERT_DIR_EXISTS(path);
+```
+
+### **Pre-commit Testing Checklist:**
+
+Before creating any snapshot or committing code, ensure:
+
+- ✅ **Build succeeds**: `make clean && make`
+- ✅ **All unit tests pass**: `./test_obj/test_core && ./test_obj/test_utils`
+- ✅ **All integration tests pass**: `./test_obj/test_fractyl_integration`
+- ✅ **Restore behavior tests pass**: `./test_obj/test_restore_behavior`
+- ✅ **Validation tests pass**: `./test_obj/test_simple_validation`
+- ✅ **No memory leaks**: Run key tests with valgrind if needed
+- ✅ **Clean build warnings**: Address any compiler warnings
+
+### **Test Failure Protocol:**
+
+1. **🚫 Never ignore test failures** - All tests must pass
+2. **🔍 Debug immediately** - Use test output to understand failures
+3. **📸 Snapshot before fixing** - Create snapshot documenting the failure
+4. **🔧 Fix the root cause** - Don't mask symptoms
+5. **✅ Verify fix** - Ensure tests pass after changes
+6. **📸 Snapshot success** - Create snapshot when tests pass
+
+### **Adding New Tests:**
+
+When implementing new features:
+
+1. **📝 Write tests first** - Define expected behavior
+2. **🔧 Implement feature** - Make tests pass
+3. **🧪 Test edge cases** - Add tests for error conditions
+4. **📊 Verify coverage** - Ensure comprehensive testing
+
+Example test structure:
+```c
+void test_new_feature(void) {
+    test_repo_t* repo = test_repo_create("new_feature_test");
+    TEST_ASSERT_NOT_NULL(repo);
+    TEST_ASSERT_EQUAL_INT(0, test_repo_enter(repo));
+    
+    // Setup
+    TEST_ASSERT_FRACTYL_SUCCESS(test_fractyl_init(repo));
+    
+    // Test the feature
+    // ... test code ...
+    
+    // Cleanup
+    test_repo_destroy(repo);
+}
+```
+
+---
+
 ## 🚀 **Claude Development Workflow**
 
 **Remember: ALWAYS use Fractyl as part of your development process!**
@@ -369,14 +523,19 @@ frac snapshot -m "Starting work on [feature/bug/task]"
 
 ### **During Development:**
 ```bash
-# After each meaningful change
+# After each meaningful change - BUT ONLY AFTER TESTS PASS
+make clean && make && ./run_basic_tests.sh
 frac snapshot -m "Specific description of what changed"
 
 # Before attempting risky changes
 frac snapshot -m "Safe state before refactoring X"
 
-# When tests pass
+# MANDATORY: When all tests pass
+make clean && make && ./run_tests.sh
 frac snapshot -m "All tests pass - [feature] working"
+
+# If tests fail - NEVER snapshot broken code
+# Fix first, then snapshot
 ```
 
 ### **If Something Breaks:**
@@ -393,8 +552,11 @@ frac snapshot -m "Restored from broken state - issue was X"
 
 ### **Finishing Work:**
 ```bash
-# Final working snapshot  
-frac snapshot -m "Complete [feature/task] - ready for review"
+# MANDATORY: Run full test suite before final snapshot
+make clean && make && ./run_tests.sh
+
+# Final working snapshot - ONLY after all tests pass
+frac snapshot -m "Complete [feature/task] - all tests pass - ready for review"
 
 # Stop daemon if desired
 frac daemon stop

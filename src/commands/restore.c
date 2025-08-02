@@ -6,6 +6,7 @@
 #include "../utils/fs.h"
 #include "../utils/paths.h"
 #include "../utils/git.h"
+#include "../utils/parallel_scan.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -439,6 +440,33 @@ int cmd_restore(int argc, char **argv) {
             p = strrchr(temp, '/');
         }
     }
+
+    // Scan current directory and remove any files not in the restored snapshot
+    // This catches files that were created after the last snapshot and never indexed
+    index_t current_state;
+    index_init(&current_state);
+    
+    // Build current state index (scan current directory)
+    result = scan_directory_parallel(repo_root, &current_state, NULL, fractyl_dir);
+    if (result == FRACTYL_OK) {
+        for (size_t i = 0; i < current_state.count; i++) {
+            const index_entry_t *cur = &current_state.entries[i];
+            if (!cur->path) continue;
+            
+            // If this file is not in the restored snapshot, remove it
+            if (!index_find_entry(&index, cur->path)) {
+                char remove_path[PATH_MAX];
+                snprintf(remove_path, sizeof(remove_path), "%s/%s", repo_root, cur->path);
+                
+                printf("Removing untracked file %s...\n", cur->path);
+                if (unlink(remove_path) != 0 && errno != ENOENT) {
+                    printf("Warning: Failed to remove %s\n", remove_path);
+                }
+            }
+        }
+    }
+    
+    index_free(&current_state);
 
     index_free(&current_index);
     
