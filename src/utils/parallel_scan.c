@@ -832,8 +832,11 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
                 }
                 
                 // Direct assignment - much faster than index_add_entry O(n) search
-                new_index->entries[new_index->count] = *prev_entry;
                 new_index->entries[new_index->count].path = strdup(prev_entry->path);
+                memcpy(new_index->entries[new_index->count].hash, prev_entry->hash, 32);
+                new_index->entries[new_index->count].mode = prev_entry->mode;
+                new_index->entries[new_index->count].size = prev_entry->size;
+                new_index->entries[new_index->count].mtime = prev_entry->mtime;
                 new_index->count++;
                 
                 files_unchanged++;
@@ -1270,8 +1273,11 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
                 }
                 
                 // Direct assignment - much faster than index_add_entry O(n) search
-                new_index->entries[new_index->count] = *prev_entry;
                 new_index->entries[new_index->count].path = strdup(prev_entry->path);
+                memcpy(new_index->entries[new_index->count].hash, prev_entry->hash, 32);
+                new_index->entries[new_index->count].mode = prev_entry->mode;
+                new_index->entries[new_index->count].size = prev_entry->size;
+                new_index->entries[new_index->count].mtime = prev_entry->mtime;
                 new_index->count++;
                 
                 files_unchanged++;
@@ -1326,9 +1332,9 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
     // This is the tradeoff for maximum performance - like git status --porcelain=v1
     // Users can run full scan when they want to detect new files
     
-    if (files_changed + files_deleted > 0 || binary_index.header.entry_count < 1000) {
-        // If there are changes or small repo, do a quick new file check
-        printf("Quick new file check (changes detected or small repo)...\n");
+    // Always do new file detection unless explicitly disabled
+    // This ensures we catch new files even when existing files are unchanged
+    printf("Quick new file check (always run for completeness)...\n");
         
         phase_start = time(NULL);
         int files_new = 0;
@@ -1342,9 +1348,6 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
             printf("No new files found (%.3fs)\n", 
                    difftime(time(NULL), phase_start));
         }
-    } else {
-        printf("Skipping new file detection (stat-only mode, no changes)\n");
-    }
     
     // Save updated binary index
     phase_start = time(NULL);

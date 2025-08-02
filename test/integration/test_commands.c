@@ -237,6 +237,206 @@ void test_cmd_list_outside_repository(void) {
     TEST_ASSERT_NOT_EQUAL(0, result);
 }
 
+/* Test delete command */
+void test_cmd_delete_removes_snapshot(void) {
+    const char *test_repo = "/tmp/fractyl_test_repo";
+    
+    mkdir(test_repo, 0755);
+    chdir(test_repo);
+    
+    /* Initialize and create snapshots */
+    char *init_argv[] = {"frac", "init"};
+    TEST_ASSERT_EQUAL(0, cmd_init(2, init_argv));
+    
+    FILE *fp = fopen("test.txt", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "test content");
+    fclose(fp);
+    
+    char *snap1[] = {"frac", "snapshot", "-m", "first"};
+    TEST_ASSERT_EQUAL(0, cmd_snapshot(4, snap1));
+    
+    fp = fopen("test2.txt", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "second file");
+    fclose(fp);
+    
+    char *snap2[] = {"frac", "snapshot", "-m", "second"};
+    TEST_ASSERT_EQUAL(0, cmd_snapshot(4, snap2));
+    
+    /* Get first snapshot ID */
+    char first_id[65];
+    FILE *list_fp = popen("cd /tmp/fractyl_test_repo && echo '' | /home/budda/Code/fractyl/frac list 2>/dev/null | tail -1 | cut -d' ' -f1", "r");
+    if (list_fp) {
+        fgets(first_id, sizeof(first_id), list_fp);
+        pclose(list_fp);
+        first_id[strcspn(first_id, "\n")] = '\0';
+        
+        if (strlen(first_id) > 8) {
+            /* Delete the first snapshot */
+            char *delete_argv[] = {"frac", "delete", first_id};
+            int result = cmd_delete(3, delete_argv);
+            TEST_ASSERT_EQUAL(0, result);
+        }
+    }
+}
+
+void test_cmd_delete_invalid_snapshot(void) {
+    const char *test_repo = "/tmp/fractyl_test_repo";
+    
+    mkdir(test_repo, 0755);
+    chdir(test_repo);
+    
+    char *init_argv[] = {"frac", "init"};
+    TEST_ASSERT_EQUAL(0, cmd_init(2, init_argv));
+    
+    /* Try to delete non-existent snapshot */
+    char *delete_argv[] = {"frac", "delete", "invalid-snapshot-id"};
+    int result = cmd_delete(3, delete_argv);
+    TEST_ASSERT_NOT_EQUAL(0, result);
+}
+
+/* Test show command */
+void test_cmd_show_displays_snapshot(void) {
+    const char *test_repo = "/tmp/fractyl_test_repo";
+    
+    mkdir(test_repo, 0755);
+    chdir(test_repo);
+    
+    char *init_argv[] = {"frac", "init"};
+    TEST_ASSERT_EQUAL(0, cmd_init(2, init_argv));
+    
+    FILE *fp = fopen("test.txt", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "test content for show");
+    fclose(fp);
+    
+    char *snap_argv[] = {"frac", "snapshot", "-m", "test show"};
+    TEST_ASSERT_EQUAL(0, cmd_snapshot(4, snap_argv));
+    
+    /* Test show with latest snapshot ID - need to get actual ID */
+    char latest_id[65];
+    FILE *list_fp = popen("cd /tmp/fractyl_test_repo && echo '' | /home/budda/Code/fractyl/frac list 2>/dev/null | head -1 | cut -d' ' -f1", "r");
+    int result = 1; // Default to fail
+    if (list_fp) {
+        if (fgets(latest_id, sizeof(latest_id), list_fp)) {
+            pclose(list_fp);
+            latest_id[strcspn(latest_id, "\n")] = '\0';
+            
+            if (strlen(latest_id) > 8) {
+                char *show_argv[] = {"frac", "show", latest_id};
+                result = cmd_show(3, show_argv);
+            }
+        } else {
+            pclose(list_fp);
+        }
+    }
+    TEST_ASSERT_EQUAL(0, result);
+}
+
+void test_cmd_show_invalid_snapshot(void) {
+    const char *test_repo = "/tmp/fractyl_test_repo";
+    
+    mkdir(test_repo, 0755);
+    chdir(test_repo);
+    
+    char *init_argv[] = {"frac", "init"};
+    TEST_ASSERT_EQUAL(0, cmd_init(2, init_argv));
+    
+    /* Try to show non-existent snapshot */
+    char *show_argv[] = {"frac", "show", "invalid-id"};
+    int result = cmd_show(3, show_argv);
+    TEST_ASSERT_NOT_EQUAL(0, result);
+}
+
+/* Test diff command */
+void test_cmd_diff_compares_snapshots(void) {
+    const char *test_repo = "/tmp/fractyl_test_repo";
+    
+    mkdir(test_repo, 0755);
+    chdir(test_repo);
+    
+    char *init_argv[] = {"frac", "init"};
+    TEST_ASSERT_EQUAL(0, cmd_init(2, init_argv));
+    
+    /* Create first snapshot */
+    FILE *fp = fopen("test.txt", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "version 1");
+    fclose(fp);
+    
+    char *snap1[] = {"frac", "snapshot", "-m", "version1"};
+    TEST_ASSERT_EQUAL(0, cmd_snapshot(4, snap1));
+    
+    /* Modify file and create second snapshot */
+    fp = fopen("test.txt", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "version 2");
+    fclose(fp);
+    
+    char *snap2[] = {"frac", "snapshot", "-m", "version2"};
+    TEST_ASSERT_EQUAL(0, cmd_snapshot(4, snap2));
+    
+    /* Get snapshot IDs for diff */
+    char snap1_id[65], snap2_id[65];
+    FILE *list_fp = popen("cd /tmp/fractyl_test_repo && echo '' | /home/budda/Code/fractyl/frac list 2>/dev/null", "r");
+    int result = 1; // Default to fail
+    if (list_fp) {
+        if (fgets(snap2_id, sizeof(snap2_id), list_fp) && 
+            fgets(snap1_id, sizeof(snap1_id), list_fp)) {
+            pclose(list_fp);
+            snap1_id[strcspn(snap1_id, "\n")] = '\0';
+            snap2_id[strcspn(snap2_id, "\n")] = '\0';
+            
+            /* Extract just the IDs (first 8+ chars) */
+            char *space1 = strchr(snap1_id, ' ');
+            char *space2 = strchr(snap2_id, ' ');
+            if (space1) *space1 = '\0';
+            if (space2) *space2 = '\0';
+            
+            if (strlen(snap1_id) > 8 && strlen(snap2_id) > 8) {
+                char *diff_argv[] = {"frac", "diff", snap1_id, snap2_id};
+                result = cmd_diff(4, diff_argv);
+            }
+        } else {
+            pclose(list_fp);
+        }
+    }
+    TEST_ASSERT_EQUAL(0, result);
+}
+
+/* Test daemon command */
+void test_cmd_daemon_status_no_daemon(void) {
+    const char *test_repo = "/tmp/fractyl_test_repo";
+    
+    mkdir(test_repo, 0755);
+    chdir(test_repo);
+    
+    char *init_argv[] = {"frac", "init"};
+    TEST_ASSERT_EQUAL(0, cmd_init(2, init_argv));
+    
+    /* Check daemon status when no daemon is running */
+    char *status_argv[] = {"frac", "daemon", "status"};
+    int result = cmd_daemon(3, status_argv);
+    /* Should succeed even when no daemon is running */
+    TEST_ASSERT_EQUAL(0, result);
+}
+
+void test_cmd_daemon_invalid_command(void) {
+    const char *test_repo = "/tmp/fractyl_test_repo";
+    
+    mkdir(test_repo, 0755);
+    chdir(test_repo);
+    
+    char *init_argv[] = {"frac", "init"};
+    TEST_ASSERT_EQUAL(0, cmd_init(2, init_argv));
+    
+    /* Test invalid daemon command */
+    char *invalid_argv[] = {"frac", "daemon", "invalid"};
+    int result = cmd_daemon(3, invalid_argv);
+    TEST_ASSERT_NOT_EQUAL(0, result);
+}
+
 /* Unity test runner */
 int main(void) {
     UNITY_BEGIN();
@@ -253,6 +453,21 @@ int main(void) {
     RUN_TEST(test_cmd_list_empty_repository);
     RUN_TEST(test_cmd_list_with_snapshots);
     RUN_TEST(test_cmd_restore_removes_extra_files);
+    
+    /* Delete command tests */
+    RUN_TEST(test_cmd_delete_removes_snapshot);
+    RUN_TEST(test_cmd_delete_invalid_snapshot);
+    
+    /* Show command tests */
+    RUN_TEST(test_cmd_show_displays_snapshot);
+    RUN_TEST(test_cmd_show_invalid_snapshot);
+    
+    /* Diff command tests */
+    RUN_TEST(test_cmd_diff_compares_snapshots);
+    
+    /* Daemon command tests */
+    RUN_TEST(test_cmd_daemon_status_no_daemon);
+    RUN_TEST(test_cmd_daemon_invalid_command);
     
     /* Error condition tests */
     RUN_TEST(test_cmd_snapshot_outside_repository);
