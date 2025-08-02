@@ -4,6 +4,9 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -std=gnu99 -g -Wno-format-truncation -Wno-deprecated-declarations
 COVERAGE_CFLAGS = $(CFLAGS) --coverage
+# AddressSanitizer and debugging flags for memory error detection
+DEBUG_CFLAGS = $(CFLAGS) -fsanitize=address -fsanitize=undefined -fstack-protector-strong
+DEBUG_LDFLAGS = -fsanitize=address -fsanitize=undefined
 INCLUDES = -Isrc/include -Isrc/utils -Isrc/core -Isrc/vendor/xdiff
 LDFLAGS = 
 COVERAGE_LDFLAGS = $(LDFLAGS) --coverage
@@ -97,9 +100,14 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)/daemon
 	mkdir -p $(OBJDIR)/vendor/xdiff
 
-# Debug build
-debug: CFLAGS += -DDEBUG -O0
+# Debug build with sanitizers for memory error detection
+debug: CFLAGS := $(DEBUG_CFLAGS) -DDEBUG -O0
+debug: LDFLAGS := $(DEBUG_LDFLAGS)
 debug: $(TARGET)
+
+# Regular debug build (no sanitizers)
+debug-simple: CFLAGS += -DDEBUG -O0
+debug-simple: $(TARGET)
 
 # Release build
 release: CFLAGS += -O2 -DNDEBUG

@@ -999,18 +999,9 @@ static int traverse_for_new_files(const char *current_path, const char *rel_path
                     new_entry.mtime = st.st_mtime;
                     memcpy(new_entry.hash, hash, 32);
                     
-                    // Fast direct assignment without O(n) duplicate checking
-                if (new_index->count >= new_index->capacity) {
-                    size_t new_capacity = new_index->capacity == 0 ? 1024 : new_index->capacity * 2;
-                    index_entry_t *new_entries = realloc(new_index->entries, new_capacity * sizeof(index_entry_t));
-                    if (new_entries) {
-                        new_index->entries = new_entries;
-                        new_index->capacity = new_capacity;
-                    }
-                }
-                if (new_index->count < new_index->capacity) {
-                    new_index->entries[new_index->count] = new_entry;
-                    new_index->count++;
+                    // Use fast direct append since we know no duplicates exist
+                    result = index_add_entry_direct(new_index, &new_entry);
+                    if (result == FRACTYL_OK) {
                         // Also add to binary index for future runs
                         unsigned char sha1_hash[20];
                         memcpy(sha1_hash, hash, 20); // Use first 20 bytes for SHA-1 compatibility

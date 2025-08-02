@@ -101,13 +101,15 @@ static char* get_current_snapshot_id(const char *fractyl_dir, const char *branch
 
 // Generate short hash from snapshot ID (first 6 characters)
 static void generate_short_hash(const char *snapshot_id, char *short_hash, size_t max_len) {
-    size_t id_len = strlen(snapshot_id);
-    size_t copy_len = (id_len < 6) ? id_len : 6;
+    if (max_len == 0) return;
+    
+    size_t copy_len = 6; // Always try to copy 6 characters
     if (copy_len >= max_len) {
         copy_len = max_len - 1;
     }
-    strncpy(short_hash, snapshot_id, copy_len);
-    short_hash[copy_len] = '\0';
+    
+    // Use snprintf to safely copy and null-terminate
+    snprintf(short_hash, max_len, "%.*s", (int)copy_len, snapshot_id);
 }
 
 // Check if we're creating a divergent branch
@@ -335,6 +337,9 @@ int cmd_snapshot(int argc, char **argv) {
     // Get current git branch
     char *git_branch = paths_get_current_branch(repo_root);
     
+    // Use default branch name for non-git repositories
+    const char *branch_name = git_branch ? git_branch : "main";
+    
     // Migrate legacy snapshots if needed (first time on a branch)
     if (git_branch) {
         paths_migrate_legacy_snapshots(fractyl_dir, git_branch);
@@ -381,11 +386,12 @@ int cmd_snapshot(int argc, char **argv) {
     printf("Scanning directory...\n");
     
     // Use stat-only scanning for maximum performance
-    int result = scan_directory_stat_only(repo_root, &new_index, prev_index_ptr, fractyl_dir, git_branch);
+    int result = scan_directory_stat_only(repo_root, &new_index, prev_index_ptr, fractyl_dir, branch_name);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to scan directory: %d\n", result);
         if (auto_message) free(auto_message);
         free(repo_root);
+        free(git_branch);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         fractyl_lock_release(&lock);
@@ -472,6 +478,7 @@ int cmd_snapshot(int argc, char **argv) {
         printf("No changes detected since last snapshot\n");
         if (auto_message) free(auto_message);
         free(repo_root);
+        free(git_branch);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         fractyl_lock_release(&lock);
@@ -501,6 +508,7 @@ int cmd_snapshot(int argc, char **argv) {
         printf("Error: Failed to generate snapshot ID\n");
         if (auto_message) free(auto_message);
         free(repo_root);
+        free(git_branch);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
         fractyl_lock_release(&lock);
@@ -538,6 +546,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(snapshot_id);
         if (auto_message) free(auto_message);
         free(repo_root);
+        free(git_branch);
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
@@ -554,6 +563,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(snapshot_id);
         if (auto_message) free(auto_message);
         free(repo_root);
+        free(git_branch);
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
@@ -570,6 +580,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(snapshot_id);
         if (auto_message) free(auto_message);
         free(repo_root);
+        free(git_branch);
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);
@@ -605,6 +616,7 @@ int cmd_snapshot(int argc, char **argv) {
         free(snapshot_id);
         if (auto_message) free(auto_message);
         free(repo_root);
+        free(git_branch);
         json_free_snapshot(&snapshot);
         if (prev_index_ptr) index_free(&prev_index);
         index_free(&new_index);

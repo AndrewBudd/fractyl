@@ -11,7 +11,7 @@
 #include "utils/fs.h"
 
 int main(int argc, char **argv) {
-    cli_options_t opts;
+    cli_options_t opts = {0}; // Initialize all fields to zero/NULL
     parse_cli_args(argc, argv, &opts);
 
     if (opts.help) {
