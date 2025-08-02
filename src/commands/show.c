@@ -3,6 +3,7 @@
 #include "../utils/json.h"
 #include "../utils/paths.h"
 #include "../utils/git.h"
+#include "../utils/snapshots.h"
 #include "../core/hash.h"
 #include "../core/objects.h"
 #include "../core/index.h"
@@ -107,6 +108,17 @@ int cmd_show(int argc, char **argv) {
     
     // Get current git branch for snapshot directory
     char *current_branch = git_is_repository(repo_root) ? git_get_current_branch(repo_root) : NULL;
+    
+    // Resolve snapshot ID (supports short IDs, relative IDs like -1, etc.)
+    char resolved_id[65];
+    int resolve_result = resolve_snapshot_id(snapshot_id, fractyl_dir, current_branch, resolved_id);
+    if (resolve_result != FRACTYL_OK) {
+        printf("Error: Snapshot '%s' not found\n", snapshot_id);
+        free(repo_root);
+        free(current_branch);
+        return 1;
+    }
+    
     char *snapshots_dir = paths_get_snapshots_dir(fractyl_dir, current_branch);
     
     if (!snapshots_dir) {
@@ -116,9 +128,9 @@ int cmd_show(int argc, char **argv) {
         return 1;
     }
     
-    // Build snapshot file path
+    // Build snapshot file path using resolved ID
     char snapshot_path[2048];
-    snprintf(snapshot_path, sizeof(snapshot_path), "%s/%s.json", snapshots_dir, snapshot_id);
+    snprintf(snapshot_path, sizeof(snapshot_path), "%s/%s.json", snapshots_dir, resolved_id);
     
     // Check if snapshot exists
     struct stat st;

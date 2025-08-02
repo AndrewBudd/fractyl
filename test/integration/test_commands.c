@@ -316,7 +316,7 @@ void test_cmd_show_displays_snapshot(void) {
     
     /* Test show with latest snapshot ID - need to get actual ID */
     char latest_id[65];
-    FILE *list_fp = popen("cd /tmp/fractyl_test_repo && echo '' | /home/budda/Code/fractyl/frac list 2>/dev/null | head -1 | cut -d' ' -f1", "r");
+    FILE *list_fp = popen("cd /tmp/fractyl_test_repo && echo '' | /home/budda/Code/fractyl/frac list 2>/dev/null | tail -1 | cut -d' ' -f1", "r");
     int result = 1; // Default to fail
     if (list_fp) {
         if (fgets(latest_id, sizeof(latest_id), list_fp)) {
@@ -382,7 +382,10 @@ void test_cmd_diff_compares_snapshots(void) {
     FILE *list_fp = popen("cd /tmp/fractyl_test_repo && echo '' | /home/budda/Code/fractyl/frac list 2>/dev/null", "r");
     int result = 1; // Default to fail
     if (list_fp) {
-        if (fgets(snap2_id, sizeof(snap2_id), list_fp) && 
+        char header[65];
+        // Skip "Snapshot History:" header
+        if (fgets(header, sizeof(header), list_fp) &&
+            fgets(snap2_id, sizeof(snap2_id), list_fp) && 
             fgets(snap1_id, sizeof(snap1_id), list_fp)) {
             pclose(list_fp);
             snap1_id[strcspn(snap1_id, "\n")] = '\0';

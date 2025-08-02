@@ -15,6 +15,7 @@ void tearDown(void) {
 
 // Helper function to run daemon commands
 int test_daemon_command(test_repo_t* repo, const char* command) {
+    (void)repo; // Unused parameter
     char* argv[] = {test_frac_executable, "daemon", (char*)command, NULL};
     test_command_result_t* result = test_run_command(test_frac_executable, argv);
     int exit_code = result ? result->exit_code : -1;
@@ -23,6 +24,7 @@ int test_daemon_command(test_repo_t* repo, const char* command) {
 }
 
 int test_daemon_start_with_interval(test_repo_t* repo, int interval) {
+    (void)repo; // Unused parameter
     char interval_str[16];
     snprintf(interval_str, sizeof(interval_str), "%d", interval);
     char* argv[] = {test_frac_executable, "daemon", "start", "-i", interval_str, NULL};
@@ -33,6 +35,7 @@ int test_daemon_start_with_interval(test_repo_t* repo, int interval) {
 }
 
 char* test_daemon_status(test_repo_t* repo) {
+    (void)repo; // Unused parameter
     char* argv[] = {test_frac_executable, "daemon", "status", NULL};
     test_command_result_t* result = test_run_command(test_frac_executable, argv);
     char* output = NULL;
@@ -168,14 +171,14 @@ void test_daemon_error_conditions(void) {
     TEST_ASSERT_FRACTYL_SUCCESS(test_fractyl_init(repo));
     
     // Try to stop daemon when not running
-    int result = test_daemon_command(repo, "stop");
+    test_daemon_command(repo, "stop");
     // This might succeed or fail depending on implementation
     
     // Start daemon
     TEST_ASSERT_FRACTYL_SUCCESS(test_daemon_command(repo, "start"));
     
     // Try to start again (should handle gracefully)
-    result = test_daemon_command(repo, "start");
+    test_daemon_command(repo, "start");
     // This should either succeed (no-op) or fail gracefully
     
     // Stop daemon

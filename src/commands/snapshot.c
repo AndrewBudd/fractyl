@@ -337,8 +337,7 @@ int cmd_snapshot(int argc, char **argv) {
     // Get current git branch
     char *git_branch = paths_get_current_branch(repo_root);
     
-    // Use default branch name for non-git repositories
-    const char *branch_name = git_branch ? git_branch : "main";
+    // Use default branch name for non-git repositories (handled by scan function)
     
     // Migrate legacy snapshots if needed (first time on a branch)
     if (git_branch) {
@@ -384,8 +383,8 @@ int cmd_snapshot(int argc, char **argv) {
     
     // Scanning directory for changes
     
-    // Use stat-only scanning for maximum performance
-    int result = scan_directory_stat_only(repo_root, &new_index, prev_index_ptr, fractyl_dir, branch_name);
+    // Use parallel scanning for reliable change detection
+    int result = scan_directory_parallel(repo_root, &new_index, prev_index_ptr, fractyl_dir);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to scan directory: %d\n", result);
         if (auto_message) free(auto_message);

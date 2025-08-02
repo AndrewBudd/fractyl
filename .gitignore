@@ -10,9 +10,10 @@
 o/
 build/
 dist/
+test_obj/
 
 # Executable (project-specific)
-fractyl
+frac
 
 # Temporary files
 *.tmp
