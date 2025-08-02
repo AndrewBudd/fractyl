@@ -249,7 +249,7 @@ char* test_fractyl_list(test_repo_t* repo) {
     char* argv[] = {test_frac_executable, "list", NULL};
     test_command_result_t* result = test_run_command(test_frac_executable, argv);
     char* output = NULL;
-    if (result && result->stdout_content) {
+    if (result && result->exit_code == 0 && result->stdout_content && strlen(result->stdout_content) > 0) {
         output = strdup(result->stdout_content);
     }
     test_command_result_free(result);

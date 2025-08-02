@@ -323,7 +323,7 @@ void test_cmd_show_displays_snapshot(void) {
             pclose(list_fp);
             latest_id[strcspn(latest_id, "\n")] = '\0';
             
-            if (strlen(latest_id) > 8) {
+            if (strlen(latest_id) >= 4) { // Minimum 4 chars for valid snapshot ID
                 char *show_argv[] = {"frac", "show", latest_id};
                 result = cmd_show(3, show_argv);
             }
@@ -397,7 +397,7 @@ void test_cmd_diff_compares_snapshots(void) {
             if (space1) *space1 = '\0';
             if (space2) *space2 = '\0';
             
-            if (strlen(snap1_id) > 8 && strlen(snap2_id) > 8) {
+            if (strlen(snap1_id) >= 4 && strlen(snap2_id) >= 4) { // Minimum 4 chars for valid snapshot IDs
                 char *diff_argv[] = {"frac", "diff", snap1_id, snap2_id};
                 result = cmd_diff(4, diff_argv);
             }
