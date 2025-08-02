@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
+#include <inttypes.h>
 
 // Ensure DT_* constants are available
 #ifndef DT_UNKNOWN
@@ -128,7 +129,7 @@ static void process_file(thread_pool_t *pool, const char *full_path, const char 
     // Skip large files
     if (st->st_size > 1024 * 1024 * 1024) {
         pthread_mutex_lock(&pool->stats_mutex);
-        printf("Skipping large file: %s (%ld bytes)\n", rel_path, st->st_size);
+        printf("Skipping large file: %s (%" PRIdMAX " bytes)\n", rel_path, (intmax_t)st->st_size);
         pthread_mutex_unlock(&pool->stats_mutex);
         return;
     }
@@ -1030,6 +1031,12 @@ static int traverse_for_new_files(const char *current_path, const char *rel_path
                 traverse_for_new_files(full_path, new_rel_path, index, new_index, 
                                      fractyl_dir, new_count);
             } else if (S_ISREG(st.st_mode)) {
+                // Skip large files
+                if (st.st_size > 1024 * 1024 * 1024) {
+                    printf("Skipping large file: %s (%" PRIdMAX " bytes)\n", new_rel_path, (intmax_t)st.st_size);
+                    continue;
+                }
+                
                 // Check if file is in binary index
                 const binary_index_entry_t *existing = binary_index_find_entry(index, new_rel_path, NULL);
                 if (!existing) {
@@ -1045,18 +1052,9 @@ static int traverse_for_new_files(const char *current_path, const char *rel_path
                         new_entry.mtime = st.st_mtime;
                         memcpy(new_entry.hash, hash, 32);
                         
-                        // Fast direct assignment without O(n) duplicate checking
-                if (new_index->count >= new_index->capacity) {
-                    size_t new_capacity = new_index->capacity == 0 ? 1024 : new_index->capacity * 2;
-                    index_entry_t *new_entries = realloc(new_index->entries, new_capacity * sizeof(index_entry_t));
-                    if (new_entries) {
-                        new_index->entries = new_entries;
-                        new_index->capacity = new_capacity;
-                    }
-                }
-                if (new_index->count < new_index->capacity) {
-                    new_index->entries[new_index->count] = new_entry;
-                    new_index->count++;
+                        // Use fast direct append since we know no duplicates exist
+                        result = index_add_entry_direct(new_index, &new_entry);
+                        if (result == FRACTYL_OK) {
                             // Also add to binary index for future runs
                             unsigned char sha1_hash[20];
                             memcpy(sha1_hash, hash, 20); // Use first 20 bytes for SHA-1 compatibility
