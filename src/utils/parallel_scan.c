@@ -664,10 +664,7 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
         return FRACTYL_ERROR_INVALID_ARGS;
     }
     
-    printf("🚀 BINARY INDEX: Using high-performance binary index with parallel stat\n");
-    
-    time_t start_time = time(NULL);
-    time_t phase_start = time(NULL);
+    // Using high-performance binary index
     
     // Load binary index
     binary_index_t binary_index;
@@ -683,8 +680,7 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
         printf("Initialized empty binary index for branch: %s\n", branch);
     }
     
-    printf("Binary index loaded: %u entries in %.1fs\n", 
-           binary_index.header.entry_count, difftime(time(NULL), phase_start));
+    // Binary index loaded
     
     // Statistics
     int files_unchanged = 0;
@@ -692,12 +688,9 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
     int files_new = 0;
     int files_deleted = 0;
     
-    phase_start = time(NULL);
-    
     // Phase 1: Git-style parallel stat checking for all known files
     const int STAT_THREADS = 8; // Git uses up to 20, we'll start conservatively
-    printf("Phase 1: Parallel stat checking %u files using %d threads...\n", 
-           binary_index.header.entry_count, STAT_THREADS);
+    // Phase 1: Parallel stat checking
     
     // Create parallel stat work data similar to Git's preload_thread
     char **file_paths = malloc(binary_index.header.entry_count * sizeof(char*));
@@ -749,7 +742,7 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
         pthread_join(threads[i], NULL);
     }
     
-    printf("Parallel stat complete, processing results... (%.3fs)\n", difftime(time(NULL), phase_start));
+    // Processing results
     
     // Build hash table for O(1) previous index lookups (fixes O(n²) bottleneck!)
     typedef struct prev_entry_hash {
@@ -784,7 +777,7 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
                     }
                 }
             }
-            printf("Built hash table for %zu previous entries\n", prev_index->count);
+            // Built hash table for previous entries
         }
     }
     
@@ -867,11 +860,9 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
         file_idx++;
     }
     
-    printf("Phase 1 complete: %d unchanged, %d changed, %d deleted files (%.3fs)\n",
-           files_unchanged, files_changed, files_deleted, difftime(time(NULL), phase_start));
+    // Phase 1 complete
     
     // Phase 2: Quick new file detection (only if we have changes or it's been a while)
-    phase_start = time(NULL);
     time_t index_age = time(NULL) - binary_index.header.timestamp;
     int skip_new_scan = (files_changed == 0 && files_deleted == 0 && 
                         index_age < 300 && binary_index.header.entry_count > 0); // 5 minutes and not empty
@@ -879,28 +870,25 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
     if (skip_new_scan) {
         printf("Phase 2: Skipping new file scan (no changes, recent index)\n");
     } else {
-        printf("Phase 2: Quick scan for new files...\n");
+        // Phase 2: Quick scan for new files
         
         // Use lightweight directory traversal to find files not in index
         int new_files_found = scan_for_new_files_only(root_path, &binary_index, 
                                                      new_index, fractyl_dir, &files_new);
         
         if (new_files_found > 0) {
-            printf("Phase 2: Found %d new files (%.3fs)\n", 
-                   files_new, difftime(time(NULL), phase_start));
+            // Found new files
         } else {
-            printf("Phase 2: No new files found (%.3fs)\n", 
-                   difftime(time(NULL), phase_start));
+            // No new files found
         }
     }
     
     // Phase 3: Save updated binary index
-    phase_start = time(NULL);
     result = binary_index_save(&binary_index, fractyl_dir);
     if (result != FRACTYL_OK) {
         printf("Warning: Could not save binary index\n");
     } else {
-        printf("Binary index saved (%.3fs)\n", difftime(time(NULL), phase_start));
+        // Binary index saved
     }
     
     // Cleanup hash table
@@ -926,9 +914,7 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
     free(stat_success);
     binary_index_free(&binary_index);
     
-    time_t total_time = time(NULL) - start_time;
-    printf("Binary index scan complete: %d unchanged, %d changed, %d new, %d deleted files (%.3fs total)\n",
-           files_unchanged, files_changed, files_new, files_deleted, (double)total_time);
+    // Scan complete
     
     return FRACTYL_OK;
 }
@@ -1073,9 +1059,8 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
         return FRACTYL_ERROR_INVALID_ARGS;
     }
     
-    printf("Using pure stat-only scanning (no directory traversal)\n");
+    // Using pure stat-only scanning
     
-    time_t start_time = time(NULL);
     time_t phase_start = time(NULL);
     
     // Load binary index - this is required for stat-only mode
@@ -1086,11 +1071,10 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
         return scan_directory_binary(root_path, new_index, prev_index, fractyl_dir, branch);
     }
     
-    printf("Binary index loaded: %u entries in %.3fs\n", 
-           binary_index.header.entry_count, difftime(time(NULL), phase_start));
+    // Binary index loaded silently
     
     if (binary_index.header.entry_count == 0) {
-        printf("Empty binary index, falling back to binary scan with traversal\n");
+        // Empty binary index, falling back to binary scan
         binary_index_free(&binary_index);
         return scan_directory_binary(root_path, new_index, prev_index, fractyl_dir, branch);
     }
@@ -1104,8 +1088,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
     
     // Pure parallel stat checking - the fastest possible approach
     const int STAT_THREADS = 8; // Optimal for most systems
-    printf("Pure stat-only mode: %u files using %d threads (no directory traversal)...\n", 
-           binary_index.header.entry_count, STAT_THREADS);
+    // Pure stat-only mode scanning
     
     // Create parallel stat work data similar to Git's preload_thread
     char **file_paths = malloc(binary_index.header.entry_count * sizeof(char*));
@@ -1135,7 +1118,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
         file_count++;
     }
     
-    printf("Parallel stat phase: %zu files...\n", file_count);
+    // Parallel stat phase
     
     // Create stat worker threads (like Git's preload_index)
     pthread_t threads[STAT_THREADS];
@@ -1159,8 +1142,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
         pthread_join(threads[i], NULL);
     }
     
-    time_t stat_end = time(NULL);
-    printf("Parallel stat complete in %.3fs, processing results...\n", difftime(stat_end, phase_start));
+    // Processing results
     
     // Build hash table for O(1) previous index lookups (fixes O(n²) bottleneck!)
     typedef struct prev_entry_hash {
@@ -1195,7 +1177,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
                     }
                 }
             }
-            printf("Built hash table for %zu previous entries\n", prev_index->count);
+            // Built hash table for previous entries
         }
     }
     
@@ -1278,8 +1260,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
         file_idx++;
     }
     
-    printf("Stat-only phase complete: %d unchanged, %d changed, %d deleted files (%.3fs)\n",
-           files_unchanged, files_changed, files_deleted, difftime(time(NULL), phase_start));
+    // Stat-only phase complete
     
     // NOTE: Stat-only mode doesn't detect new files by design
     // This is the tradeoff for maximum performance - like git status --porcelain=v1
@@ -1287,7 +1268,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
     
     // Always do new file detection unless explicitly disabled
     // This ensures we catch new files even when existing files are unchanged
-    printf("Quick new file check (always run for completeness)...\n");
+    // Quick new file check
         
         phase_start = time(NULL);
         int files_new = 0;
@@ -1298,8 +1279,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
             printf("Found %d new files (%.3fs)\n", 
                    files_new, difftime(time(NULL), phase_start));
         } else {
-            printf("No new files found (%.3fs)\n", 
-                   difftime(time(NULL), phase_start));
+            // No new files found
         }
     
     // Save updated binary index
@@ -1308,7 +1288,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
     if (result != FRACTYL_OK) {
         printf("Warning: Could not save binary index\n");
     } else {
-        printf("Binary index saved (%.3fs)\n", difftime(time(NULL), phase_start));
+        // Binary index saved
     }
     
     // Cleanup hash table
@@ -1334,9 +1314,7 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
     free(stat_success);
     binary_index_free(&binary_index);
     
-    time_t total_time = time(NULL) - start_time;
-    printf("Stat-only scan complete: %d unchanged, %d changed, %d deleted files (%.3fs total)\n",
-           files_unchanged, files_changed, files_deleted, (double)total_time);
+    // Stat-only scan complete
     
     return FRACTYL_OK;
 }

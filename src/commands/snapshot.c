@@ -370,8 +370,7 @@ int cmd_snapshot(int argc, char **argv) {
                 // Load the index from the snapshot's index hash
                 if (load_snapshot_index(current_snapshot.index_hash, fractyl_dir, &prev_index) == FRACTYL_OK) {
                     prev_index_ptr = &prev_index;
-                    printf("Comparing against snapshot %s (%s)...\n", current_snapshot_id, 
-                           current_snapshot.description ? current_snapshot.description : "no description");
+                    // Comparing against snapshot for changes
                 }
                 json_free_snapshot(&current_snapshot);
             }
@@ -383,7 +382,7 @@ int cmd_snapshot(int argc, char **argv) {
     index_t new_index;
     index_init(&new_index);
     
-    printf("Scanning directory...\n");
+    // Scanning directory for changes
     
     // Use stat-only scanning for maximum performance
     int result = scan_directory_stat_only(repo_root, &new_index, prev_index_ptr, fractyl_dir, branch_name);
@@ -398,7 +397,7 @@ int cmd_snapshot(int argc, char **argv) {
         return 1;
     }
     
-    printf("Found %zu files\n", new_index.count);
+    // Found files, checking for changes
     
     // Check if there are any actual changes
     // Use optimized change detection to avoid O(n²) complexity
@@ -410,12 +409,12 @@ int cmd_snapshot(int argc, char **argv) {
     } else if (new_index.count != prev_index.count) {
         // Different file counts - definitely changes
         changes_detected = 1;
-        printf("File count changed: %zu -> %zu\n", prev_index.count, new_index.count);
+        // File count changed
     } else {
         // Same file count - do optimized comparison
         // Since both indexes should be sorted the same way from scanning,
         // we can do a direct comparison without expensive lookups
-        printf("Comparing %zu files for changes...\n", new_index.count);
+        // Comparing files for changes
         
         for (size_t i = 0; i < new_index.count && changes_detected < 10; i++) {
             const index_entry_t *new_entry = &new_index.entries[i];
@@ -426,20 +425,19 @@ int cmd_snapshot(int argc, char **argv) {
                 memcmp(new_entry->hash, prev_entry->hash, 32) != 0) {
                 changes_detected++;
                 if (strcmp(new_entry->path, prev_entry->path) != 0) {
-                    printf("  Files reordered at index %zu: '%s' vs '%s'\n", 
-                           i, new_entry->path, prev_entry->path);
+                    // Files reordered
                     // If files are reordered, fall back to careful comparison
                     changes_detected = -1; // Signal to use fallback method
                     break;
                 } else {
-                    printf("  M %s\n", new_entry->path);
+                    // Modified file detected
                 }
             }
         }
         
         // Fallback method if files are reordered or for verification
         if (changes_detected == -1) {
-            printf("Files reordered - using smart sampling...\n");
+            // Files reordered - using smart sampling
             changes_detected = 0;
             
             // Smart sampling approach: check every Nth file to detect if there are changes
@@ -448,7 +446,7 @@ int cmd_snapshot(int argc, char **argv) {
             size_t step = new_index.count / sample_size;
             if (step < 1) step = 1;
             
-            printf("Sampling %zu files (every %zu files)...\n", sample_size, step);
+            // Sampling files for changes
             
             for (size_t i = 0; i < new_index.count && changes_detected < 10; i += step) {
                 const index_entry_t *new_entry = &new_index.entries[i];
@@ -457,20 +455,14 @@ int cmd_snapshot(int argc, char **argv) {
                 if (!prev_entry || memcmp(new_entry->hash, prev_entry->hash, 32) != 0) {
                     changes_detected++;
                     if (!prev_entry) {
-                        printf("  A %s\n", new_entry->path);
+                        // Added file detected
                     } else {
-                        printf("  M %s\n", new_entry->path);
+                        // Modified file detected
                     }
                 }
             }
             
-            // If no changes found in sample and file counts match, assume no changes
-            if (changes_detected == 0 && new_index.count == prev_index.count) {
-                printf("No changes found in sample - assuming no changes\n");
-            } else if (changes_detected > 0) {
-                printf("Changes detected in sample - would need full comparison\n");
-                // For now, just report the sampled changes
-            }
+            // Sampling complete
         }
     }
     
@@ -483,6 +475,48 @@ int cmd_snapshot(int argc, char **argv) {
         index_free(&new_index);
         fractyl_lock_release(&lock);
         return 0;
+    }
+    
+    // Show clean summary of changes
+    if (prev_index_ptr) {
+        // Compare old and new indexes to show changes
+        int added = 0, modified = 0, deleted = 0;
+        
+        // Check for added and modified files
+        for (size_t i = 0; i < new_index.count; i++) {
+            const index_entry_t *new_entry = &new_index.entries[i];
+            if (!new_entry->path) continue;
+            
+            const index_entry_t *prev_entry = index_find_entry(prev_index_ptr, new_entry->path);
+            if (!prev_entry) {
+                printf("A %s\n", new_entry->path);
+                added++;
+            } else if (memcmp(new_entry->hash, prev_entry->hash, 32) != 0) {
+                printf("M %s\n", new_entry->path);
+                modified++;
+            }
+        }
+        
+        // Check for deleted files
+        for (size_t i = 0; i < prev_index.count; i++) {
+            const index_entry_t *prev_entry = &prev_index.entries[i];
+            if (!prev_entry->path) continue;
+            
+            const index_entry_t *new_entry = index_find_entry(&new_index, prev_entry->path);
+            if (!new_entry) {
+                printf("D %s\n", prev_entry->path);
+                deleted++;
+            }
+        }
+        
+        // Summary line
+        if (added + modified + deleted > 0) {
+            printf("%d files changed", added + modified + deleted);
+            if (added > 0) printf(", %d added", added);
+            if (modified > 0) printf(", %d modified", modified);
+            if (deleted > 0) printf(", %d deleted", deleted);
+            printf("\n");
+        }
     }
     
     // Save new index
