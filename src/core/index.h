@@ -18,6 +18,8 @@ int index_load(index_t *index, const char *path);
 int index_save(const index_t *index, const char *path);
 // Add/update index entry
 int index_add_entry(index_t *index, const index_entry_t *entry);
+// Fast direct append - assumes caller has verified no duplicates exist
+int index_add_entry_direct(index_t *index, const index_entry_t *entry);
 // Remove index entry
 int index_remove_entry(index_t *index, const char *path);
 // Find entry by path

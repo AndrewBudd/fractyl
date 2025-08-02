@@ -380,8 +380,8 @@ int cmd_snapshot(int argc, char **argv) {
     
     printf("Scanning directory...\n");
     
-    // Use parallel scanning for change detection testing (avoiding memory corruption)
-    int result = scan_directory_parallel(repo_root, &new_index, prev_index_ptr, fractyl_dir);
+    // Use stat-only scanning for maximum performance
+    int result = scan_directory_stat_only(repo_root, &new_index, prev_index_ptr, fractyl_dir, git_branch);
     if (result != FRACTYL_OK) {
         printf("Error: Failed to scan directory: %d\n", result);
         if (auto_message) free(auto_message);

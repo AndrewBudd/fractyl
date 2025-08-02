@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 // --- Index management implementation ---
 
@@ -182,6 +186,39 @@ int index_add_entry(index_t *index, const index_entry_t *entry) {
             index->entries[i].mtime = entry->mtime;
             return FRACTYL_OK;
         }
+    }
+    
+    // Expand if needed
+    if (index->count == index->capacity) {
+        size_t newcap = index->capacity ? index->capacity * 2 : 8;
+        index_entry_t *new_entries = realloc(index->entries, sizeof(index_entry_t) * newcap);
+        if (!new_entries) {
+            return FRACTYL_ERROR_OUT_OF_MEMORY;
+        }
+        index->entries = new_entries;
+        index->capacity = newcap;
+    }
+    
+    // Deep copy entry
+    index_entry_t *dest = &index->entries[index->count];
+    dest->path = strdup(entry->path);
+    if (!dest->path) {
+        return FRACTYL_ERROR_OUT_OF_MEMORY;
+    }
+    memcpy(dest->hash, entry->hash, sizeof(entry->hash));
+    dest->mode = entry->mode;
+    dest->size = entry->size;
+    dest->mtime = entry->mtime;
+    
+    index->count++;
+    return FRACTYL_OK;
+}
+
+// Fast direct append - assumes caller has verified no duplicates exist
+// Used by scan_directory_stat_only for O(1) insertion
+int index_add_entry_direct(index_t *index, const index_entry_t *entry) {
+    if (!index || !entry || !entry->path) {
+        return FRACTYL_ERROR_GENERIC;
     }
     
     // Expand if needed

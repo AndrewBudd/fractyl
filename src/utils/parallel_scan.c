@@ -822,22 +822,12 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
             }
             
             if (prev_entry) {
-                // Fast direct copy without O(n) duplicate checking
-                if (new_index->count >= new_index->capacity) {
-                    size_t new_capacity = new_index->capacity == 0 ? 1024 : new_index->capacity * 2;
-                    index_entry_t *new_entries = realloc(new_index->entries, new_capacity * sizeof(index_entry_t));
-                    if (!new_entries) continue; // Skip on memory error
-                    new_index->entries = new_entries;
-                    new_index->capacity = new_capacity;
+                // Use fast direct append since we know no duplicates exist
+                result = index_add_entry_direct(new_index, prev_entry);
+                if (result != FRACTYL_OK) {
+                    file_idx++;
+                    continue; // Skip on error
                 }
-                
-                // Direct assignment - much faster than index_add_entry O(n) search
-                new_index->entries[new_index->count].path = strdup(prev_entry->path);
-                memcpy(new_index->entries[new_index->count].hash, prev_entry->hash, 32);
-                new_index->entries[new_index->count].mode = prev_entry->mode;
-                new_index->entries[new_index->count].size = prev_entry->size;
-                new_index->entries[new_index->count].mtime = prev_entry->mtime;
-                new_index->count++;
                 
                 files_unchanged++;
                 file_idx++;
@@ -861,17 +851,9 @@ int scan_directory_binary(const char *root_path, index_t *new_index,
                 memcpy(new_entry.hash, hash, 32);
                 
                 // Fast direct assignment without O(n) duplicate checking
-                if (new_index->count >= new_index->capacity) {
-                    size_t new_capacity = new_index->capacity == 0 ? 1024 : new_index->capacity * 2;
-                    index_entry_t *new_entries = realloc(new_index->entries, new_capacity * sizeof(index_entry_t));
-                    if (new_entries) {
-                        new_index->entries = new_entries;
-                        new_index->capacity = new_capacity;
-                    }
-                }
-                if (new_index->count < new_index->capacity) {
-                    new_index->entries[new_index->count] = new_entry;
-                    new_index->count++;
+                // Use fast direct append since we know no duplicates exist
+                result = index_add_entry_direct(new_index, &new_entry);
+                if (result == FRACTYL_OK) {
                     // Update binary index
                     unsigned char sha1_hash[20];
                     memcpy(sha1_hash, hash, 20); // Use first 20 bytes for SHA-1 compatibility
@@ -1263,22 +1245,12 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
             }
             
             if (prev_entry) {
-                // Fast direct copy without O(n) duplicate checking
-                if (new_index->count >= new_index->capacity) {
-                    size_t new_capacity = new_index->capacity == 0 ? 1024 : new_index->capacity * 2;
-                    index_entry_t *new_entries = realloc(new_index->entries, new_capacity * sizeof(index_entry_t));
-                    if (!new_entries) continue; // Skip on memory error
-                    new_index->entries = new_entries;
-                    new_index->capacity = new_capacity;
+                // Use fast direct append since we know no duplicates exist
+                result = index_add_entry_direct(new_index, prev_entry);
+                if (result != FRACTYL_OK) {
+                    file_idx++;
+                    continue; // Skip on error
                 }
-                
-                // Direct assignment - much faster than index_add_entry O(n) search
-                new_index->entries[new_index->count].path = strdup(prev_entry->path);
-                memcpy(new_index->entries[new_index->count].hash, prev_entry->hash, 32);
-                new_index->entries[new_index->count].mode = prev_entry->mode;
-                new_index->entries[new_index->count].size = prev_entry->size;
-                new_index->entries[new_index->count].mtime = prev_entry->mtime;
-                new_index->count++;
                 
                 files_unchanged++;
                 file_idx++;
@@ -1302,17 +1274,9 @@ int scan_directory_stat_only(const char *root_path, index_t *new_index,
                 memcpy(new_entry.hash, hash, 32);
                 
                 // Fast direct assignment without O(n) duplicate checking
-                if (new_index->count >= new_index->capacity) {
-                    size_t new_capacity = new_index->capacity == 0 ? 1024 : new_index->capacity * 2;
-                    index_entry_t *new_entries = realloc(new_index->entries, new_capacity * sizeof(index_entry_t));
-                    if (new_entries) {
-                        new_index->entries = new_entries;
-                        new_index->capacity = new_capacity;
-                    }
-                }
-                if (new_index->count < new_index->capacity) {
-                    new_index->entries[new_index->count] = new_entry;
-                    new_index->count++;
+                // Use fast direct append since we know no duplicates exist
+                result = index_add_entry_direct(new_index, &new_entry);
+                if (result == FRACTYL_OK) {
                     // Update binary index
                     unsigned char sha1_hash[20];
                     memcpy(sha1_hash, hash, 20); // Use first 20 bytes for SHA-1 compatibility
