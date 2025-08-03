@@ -24,6 +24,7 @@
 #include "../core/index.h"
 #include "../core/objects.h"
 #include "gitignore.h"
+#include "git.h"
 #include "paths.h"
 #include "file_cache.h"
 #include "batch_index.h"
@@ -261,7 +262,11 @@ static void* worker_thread(void *arg) {
             
             // Git-style d_type optimization: avoid stat() when possible
             if (entry->d_type == DT_DIR) {
-                // Directory - no stat() needed!
+                // Directory - check for git submodule boundary
+                if (git_is_repository_root(full_path)) {
+                    // Skip git submodules/repositories to avoid crossing boundaries
+                    continue;
+                }
                 enqueue_work(pool, full_path, new_rel_path);
             } else if (entry->d_type == DT_REG) {
                 // Regular file - only stat() for metadata
@@ -278,6 +283,11 @@ static void* worker_thread(void *arg) {
                 }
                 
                 if (S_ISDIR(st.st_mode)) {
+                    // Directory - check for git submodule boundary
+                    if (git_is_repository_root(full_path)) {
+                        // Skip git submodules/repositories to avoid crossing boundaries
+                        continue;
+                    }
                     enqueue_work(pool, full_path, new_rel_path);
                 } else if (S_ISREG(st.st_mode)) {
                     process_file(pool, full_path, new_rel_path, &st);
@@ -961,7 +971,11 @@ static int traverse_for_new_files(const char *current_path, const char *rel_path
         
         // Git-style d_type optimization: avoid stat() when possible
         if (entry->d_type == DT_DIR) {
-            // Directory - no stat() needed!
+            // Directory - check for git submodule boundary
+            if (git_is_repository_root(full_path)) {
+                // Skip git submodules/repositories to avoid crossing boundaries
+                continue;
+            }
             traverse_for_new_files(full_path, new_rel_path, index, new_index, 
                                  fractyl_dir, new_count);
         } else if (entry->d_type == DT_REG) {
@@ -1005,6 +1019,11 @@ static int traverse_for_new_files(const char *current_path, const char *rel_path
             }
             
             if (S_ISDIR(st.st_mode)) {
+                // Directory - check for git submodule boundary
+                if (git_is_repository_root(full_path)) {
+                    // Skip git submodules/repositories to avoid crossing boundaries
+                    continue;
+                }
                 traverse_for_new_files(full_path, new_rel_path, index, new_index, 
                                      fractyl_dir, new_count);
             } else if (S_ISREG(st.st_mode)) {

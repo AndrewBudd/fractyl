@@ -204,3 +204,22 @@ char* git_get_repository_root(const char *path) {
     
     return strdup(root);
 }
+
+// Check if a directory is a git repository root (potential submodule boundary)
+// This checks for .git directory directly in the given path, not walking up the tree
+int git_is_repository_root(const char *path) {
+    if (!path) {
+        return 0;
+    }
+    
+    char git_dir[2048];
+    snprintf(git_dir, sizeof(git_dir), "%s/.git", path);
+    
+    struct stat st;
+    if (stat(git_dir, &st) == 0) {
+        // .git exists - could be directory (normal repo) or file (worktree/submodule)
+        return 1;
+    }
+    
+    return 0;
+}
