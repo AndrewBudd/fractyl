@@ -260,6 +260,119 @@ void test_multiple_snapshots(void) {
     test_repo_destroy(repo);
 }
 
+// Test git submodule boundary detection
+void test_git_submodule_boundaries(void) {
+    test_repo_t* repo = test_repo_create("submodule_test");
+    TEST_ASSERT_NOT_NULL(repo);
+    TEST_ASSERT_EQUAL_INT(0, test_repo_enter(repo));
+    
+    // Initialize fractyl repository
+    TEST_ASSERT_FRACTYL_SUCCESS(test_fractyl_init(repo));
+    
+    // Create main repository files
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("main1.txt", "Main file 1"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("main2.txt", "Main file 2"));
+    
+    // Create a normal directory with files
+    TEST_ASSERT_EQUAL_INT(0, test_dir_create("normal_dir"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("normal_dir/normal1.txt", "Normal file 1"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("normal_dir/normal2.txt", "Normal file 2"));
+    
+    // Create a git submodule (simulated by creating .git directory)
+    TEST_ASSERT_EQUAL_INT(0, test_dir_create("submodule1"));
+    TEST_ASSERT_EQUAL_INT(0, test_dir_create("submodule1/.git"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("submodule1/.git/HEAD", "ref: refs/heads/main"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("submodule1/sub1.txt", "Submodule file 1"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("submodule1/sub2.txt", "Submodule file 2"));
+    
+    // Create another submodule with .git as a file (worktree style)
+    TEST_ASSERT_EQUAL_INT(0, test_dir_create("submodule2"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("submodule2/.git", "gitdir: /path/to/real/git"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("submodule2/sub3.txt", "Submodule file 3"));
+    
+    // Create nested structure to test boundary detection works at all levels
+    TEST_ASSERT_EQUAL_INT(0, test_dir_create("nested"));
+    TEST_ASSERT_EQUAL_INT(0, test_dir_create("nested/level1"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("nested/level1/nested1.txt", "Nested file 1"));
+    TEST_ASSERT_EQUAL_INT(0, test_dir_create("nested/level1/submodule3"));
+    TEST_ASSERT_EQUAL_INT(0, test_dir_create("nested/level1/submodule3/.git"));
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("nested/level1/submodule3/sub4.txt", "Submodule file 4"));
+    
+    // Take a snapshot
+    TEST_ASSERT_FRACTYL_SUCCESS(test_fractyl_snapshot(repo, "Test submodule boundaries"));
+    
+    // Get the list output to verify what was included
+    char* list_output = test_fractyl_list(repo);
+    TEST_ASSERT_NOT_NULL(list_output);
+    
+    // Parse the snapshot output to check what files were stored
+    // We expect: main1.txt, main2.txt, normal_dir/normal1.txt, normal_dir/normal2.txt, nested/level1/nested1.txt
+    // We do NOT expect any files from submodule1/, submodule2/, or nested/level1/submodule3/
+    
+    // Get the latest snapshot ID and show its contents
+    char* snap_id = test_fractyl_get_latest_snapshot_id(repo);
+    TEST_ASSERT_NOT_NULL(snap_id);
+    
+    // Use the show command to get snapshot details
+    char show_cmd[256];
+    snprintf(show_cmd, sizeof(show_cmd), "%s show %s 2>&1", test_frac_executable, snap_id);
+    
+    FILE* show_fp = popen(show_cmd, "r");
+    TEST_ASSERT_NOT_NULL(show_fp);
+    
+    char show_output[4096] = {0};
+    size_t bytes_read = fread(show_output, 1, sizeof(show_output) - 1, show_fp);
+    show_output[bytes_read] = '\0';
+    pclose(show_fp);
+    
+    // Verify that main files and normal directory files are tracked
+    // Note: The show command might not list individual files, so we'll verify by file count
+    
+    // Alternative approach: Create a new file in each location and check if changes are detected
+    
+    // Add file to main directory - should be detected
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("main3.txt", "New main file"));
+    TEST_ASSERT_FRACTYL_SUCCESS(test_fractyl_snapshot(repo, "Added main file"));
+    
+    // Verify the new file was detected by checking snapshot was created (not "No changes")
+    char* list2 = test_fractyl_list(repo);
+    TEST_ASSERT_NOT_NULL(list2);
+    TEST_ASSERT_TRUE(strstr(list2, "Added main file") != NULL);
+    free(list2);
+    
+    // Add file to submodule - should NOT be detected
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("submodule1/sub_new.txt", "New submodule file"));
+    
+    // Try to create snapshot - should report no changes
+    char snapshot_cmd[512];
+    snprintf(snapshot_cmd, sizeof(snapshot_cmd), "%s snapshot -m \"After submodule change\" 2>&1", test_frac_executable);
+    
+    FILE* snapshot_fp = popen(snapshot_cmd, "r");
+    TEST_ASSERT_NOT_NULL(snapshot_fp);
+    
+    char snapshot_output[1024] = {0};
+    bytes_read = fread(snapshot_output, 1, sizeof(snapshot_output) - 1, snapshot_fp);
+    snapshot_output[bytes_read] = '\0';
+    pclose(snapshot_fp);
+    
+    // Should contain "No changes detected"
+    TEST_ASSERT_TRUE(strstr(snapshot_output, "No changes detected") != NULL);
+    
+    // Add file to normal directory - should be detected
+    TEST_ASSERT_EQUAL_INT(0, test_file_create("normal_dir/normal3.txt", "New normal file"));
+    TEST_ASSERT_FRACTYL_SUCCESS(test_fractyl_snapshot(repo, "Added normal file"));
+    
+    // Verify this change was detected
+    char* list3 = test_fractyl_list(repo);
+    TEST_ASSERT_NOT_NULL(list3);
+    TEST_ASSERT_TRUE(strstr(list3, "Added normal file") != NULL);
+    free(list3);
+    
+    free(snap_id);
+    free(list_output);
+    test_repo_destroy(repo);
+}
+
 int main(void) {
     // Set up the test executable path
     test_frac_executable = realpath("./frac", NULL);
@@ -277,6 +390,7 @@ int main(void) {
     RUN_TEST(test_complex_file_operations);
     RUN_TEST(test_edge_cases);
     RUN_TEST(test_multiple_snapshots);
+    RUN_TEST(test_git_submodule_boundaries);
     
     free(test_frac_executable);
     return UNITY_END();

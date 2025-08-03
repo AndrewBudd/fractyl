@@ -1,11 +1,13 @@
 #include "../unity/unity.h"
 #include "../../src/utils/fs.h"
 #include "../../src/utils/cli.h"
+#include "../../src/utils/git.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 /* Remove cjson.h for now to get basic tests working */
 
 void setUp(void) {
@@ -141,6 +143,74 @@ void test_basic_functionality(void) {
     unlink(temp_file);
 }
 
+/* Test git repository boundary detection */
+void test_git_is_repository_root_with_git_directory(void) {
+    /* Create test directory structure */
+    const char *test_dir = "/tmp/test_git_repo";
+    mkdir(test_dir, 0755);
+    
+    /* Create .git directory */
+    char git_dir[256];
+    snprintf(git_dir, sizeof(git_dir), "%s/.git", test_dir);
+    mkdir(git_dir, 0755);
+    
+    /* Test should detect as repository root */
+    TEST_ASSERT_EQUAL(1, git_is_repository_root(test_dir));
+    
+    /* Clean up */
+    rmdir(git_dir);
+    rmdir(test_dir);
+}
+
+void test_git_is_repository_root_with_git_file(void) {
+    /* Create test directory structure */
+    const char *test_dir = "/tmp/test_git_worktree";
+    mkdir(test_dir, 0755);
+    
+    /* Create .git file (like in worktrees/submodules) */
+    char git_file[256];
+    snprintf(git_file, sizeof(git_file), "%s/.git", test_dir);
+    FILE *fp = fopen(git_file, "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "gitdir: /path/to/real/git\n");
+    fclose(fp);
+    
+    /* Test should detect as repository root */
+    TEST_ASSERT_EQUAL(1, git_is_repository_root(test_dir));
+    
+    /* Clean up */
+    unlink(git_file);
+    rmdir(test_dir);
+}
+
+void test_git_is_repository_root_with_no_git(void) {
+    /* Create test directory without .git */
+    const char *test_dir = "/tmp/test_no_git_clean";
+    
+    /* First, clean up any existing test directory */
+    char rm_cmd[256];
+    snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf %s", test_dir);
+    system(rm_cmd);
+    
+    mkdir(test_dir, 0755);
+    
+    /* Test should NOT detect as repository root */
+    TEST_ASSERT_EQUAL(0, git_is_repository_root(test_dir));
+    
+    /* Clean up */
+    rmdir(test_dir);
+}
+
+void test_git_is_repository_root_with_null_path(void) {
+    /* Test with NULL path */
+    TEST_ASSERT_EQUAL(0, git_is_repository_root(NULL));
+}
+
+void test_git_is_repository_root_with_nonexistent_path(void) {
+    /* Test with non-existent path */
+    TEST_ASSERT_EQUAL(0, git_is_repository_root("/tmp/this_should_not_exist_98765"));
+}
+
 /* Unity test runner */
 int main(void) {
     UNITY_BEGIN();
@@ -163,6 +233,13 @@ int main(void) {
     
     /* Basic functionality tests */
     RUN_TEST(test_basic_functionality);
+    
+    /* Git utility tests */
+    RUN_TEST(test_git_is_repository_root_with_git_directory);
+    RUN_TEST(test_git_is_repository_root_with_git_file);
+    RUN_TEST(test_git_is_repository_root_with_no_git);
+    RUN_TEST(test_git_is_repository_root_with_null_path);
+    RUN_TEST(test_git_is_repository_root_with_nonexistent_path);
     
     return UNITY_END();
 }
